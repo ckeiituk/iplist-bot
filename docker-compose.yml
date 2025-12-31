@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  iplist-bot:
+    build: .
+    container_name: iplist-bot
+    restart: unless-stopped
+    environment:
+      - TG_TOKEN=${TG_TOKEN}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - AGENTROUTER_KEY=${AGENTROUTER_KEY}
+    env_file:
+      - .env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

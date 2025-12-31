@@ -10,6 +10,25 @@
 
 ## Установка
 
+### Вариант 1: Docker (рекомендуется)
+
+```bash
+git clone https://github.com/ckeiituk/iplist-bot.git
+cd iplist-bot
+
+# Создать .env с токенами
+cp env.example .env
+nano .env
+
+# Запустить
+docker-compose up -d
+
+# Логи
+docker-compose logs -f
+```
+
+### Вариант 2: Локально
+
 ```bash
 cd iplist-bot
 python -m venv .venv
