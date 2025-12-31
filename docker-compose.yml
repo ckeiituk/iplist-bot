@@ -9,7 +9,7 @@ services:
     environment:
       - TG_TOKEN=${TG_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - AGENTROUTER_KEY=${AGENTROUTER_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     env_file:
       - .env
     logging:
