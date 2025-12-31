@@ -168,11 +168,89 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "👋 Привет! Я бот для добавления сайтов в iplist.\n\n"
         "Просто отправь мне домен (например: greasyfork.org), и я:\n"
-        "1. Определю категорию сайта\n"
+        "1. Определю категорию сайта через AI\n"
         "2. Получу IP адреса через DNS\n"
         "3. Создам файл в репозитории\n\n"
-        "📝 Отправляй домен без http:// и www."
+        "📝 Команды:\n"
+        "• Отправь домен — автоматическая категоризация\n"
+        "• /add <домен> <категория> — указать категорию вручную\n"
+        "• /categories — список категорий"
     )
+
+
+async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show available categories."""
+    try:
+        categories = await get_categories_from_github()
+        await update.message.reply_text(
+            f"📂 Доступные категории:\n\n" + "\n".join(f"• {cat}" for cat in sorted(categories))
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {type(e).__name__}")
+        logger.exception("Error fetching categories")
+
+
+async def add_domain_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Add domain with manually specified category."""
+    if len(context.args) < 2:
+        await update.message.reply_text("Использование: /add <домен> <категория>")
+        return
+    
+    domain = context.args[0].lower().replace("https://", "").replace("http://", "").replace("www.", "").rstrip("/")
+    category = context.args[1].lower()
+    
+    status_msg = await update.message.reply_text(f"⏳ Обрабатываю {domain}...")
+    
+    try:
+        # Validate category
+        categories = await get_categories_from_github()
+        matched_cat = None
+        for cat in categories:
+            if cat.lower() == category:
+                matched_cat = cat
+                break
+        
+        if not matched_cat:
+            await status_msg.edit_text(
+                f"❌ Категория '{category}' не найдена.\n\n"
+                f"Доступные: {', '.join(sorted(categories))}"
+            )
+            return
+        
+        # Resolve DNS
+        await status_msg.edit_text(f"🔍 Резолвлю DNS для {domain}...")
+        ip4, ip6 = resolve_dns(domain)
+        
+        if not ip4 and not ip6:
+            await status_msg.edit_text(f"❌ Не удалось получить IP адреса для {domain}.")
+            return
+        
+        # Create JSON and push to GitHub
+        site_json = create_site_json(domain, ip4, ip6)
+        await status_msg.edit_text(f"📤 Создаю файл в репозитории...")
+        file_url = await create_file_in_github(matched_cat, domain, site_json)
+        
+        ip_info = []
+        if ip4:
+            ip_info.append(f"IPv4: {', '.join(ip4)}")
+        if ip6:
+            ip_info.append(f"IPv6: {', '.join(ip6)}")
+        
+        await status_msg.edit_text(
+            f"✅ Готово!\n\n"
+            f"📁 Категория: {matched_cat}\n"
+            f"🌐 {chr(10).join(ip_info)}\n\n"
+            f"🔗 {file_url}"
+        )
+        
+    except httpx.HTTPStatusError as e:
+        error_msg = f"❌ Ошибка API: {e.response.status_code}"
+        if e.response.status_code == 422:
+            error_msg += " (файл уже существует?)"
+        await status_msg.edit_text(error_msg)
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Ошибка: {type(e).__name__}")
+        logger.exception(f"Error in add_domain_manual")
 
 
 async def handle_domain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -243,6 +321,14 @@ async def handle_domain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await status_msg.edit_text(error_msg)
         logger.error(f"HTTP Error: {e}")
         
+    except httpx.ConnectError as e:
+        await status_msg.edit_text(
+            f"❌ Ошибка подключения к API.\n\n"
+            f"Попробуй указать категорию вручную: /add {domain} <категория>\n"
+            f"Доступные категории можно посмотреть: /categories"
+        )
+        logger.error(f"Connect Error: {e}")
+        
     except ValueError as e:
         await status_msg.edit_text(f"❌ {str(e)}")
         logger.error(f"Value Error: {e}")
@@ -267,6 +353,8 @@ def main() -> None:
     
     # Add handlers
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("categories", show_categories))
+    application.add_handler(CommandHandler("add", add_domain_manual))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_domain))
     
     # Run bot
