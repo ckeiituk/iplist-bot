@@ -7,6 +7,7 @@ import os
 import json
 import base64
 import logging
+import asyncio
 import dns.resolver
 import httpx
 from telegram import Update
@@ -104,6 +105,39 @@ async def classify_domain(domain: str, categories: list[str]) -> str:
     
     return category
 
+
+async def resolve_domain_from_keyword(keyword: str) -> str:
+    """Use Gemini to resolve domain from keyword (e.g. 'netflix' -> 'netflix.com')."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    
+    prompt = (
+        f"Какой основной домен у сервиса '{keyword}'? "
+        f"Верни ТОЛЬКО домен без http://, www. и пояснений. "
+        f"Если не уверен или это не известный сервис, верни 'UNKNOWN'."
+    )
+    
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "maxOutputTokens": 30,
+            "temperature": 0.1
+        }
+    }
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
+        response.raise_for_status()
+        
+    result = response.json()
+    domain = result["candidates"][0]["content"]["parts"][0]["text"].strip().lower()
+    
+    # Clean up response
+    domain = domain.replace("http://", "").replace("https://", "").replace("www.", "").rstrip("/")
+    
+    if "unknown" in domain or len(domain) > 100 or " " in domain:
+        raise ValueError(f"Не удалось определить домен для '{keyword}'")
+    
+    return domain
 
 def resolve_dns(domain: str) -> tuple[list[str], list[str]]:
     """Resolve A and AAAA records for domain."""
@@ -333,6 +367,25 @@ async def handle_domain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     status_msg = await update.message.reply_text(f"⏳ Обрабатываю {domain}...")
     
     try:
+        # Step 0: Smart domain resolution (if needed)
+        # Check if it looks like a keyword rather than a domain
+        if "." not in domain:
+            await status_msg.edit_text(f"🔍 Определяю домен для '{domain}'...")
+            try:
+                resolved_domain = await resolve_domain_from_keyword(domain)
+                await status_msg.edit_text(
+                    f"✅ Найден домен: `{resolved_domain}`\n\n"
+                    f"Продолжаю обработку..."
+                )
+                domain = resolved_domain
+                await asyncio.sleep(1)  # Give user time to see
+            except ValueError as e:
+                await status_msg.edit_text(
+                    f"❓ {str(e)}\n\n"
+                    f"Уточни полный домен или используй /add <домен> <категория>"
+                )
+                return
+        
         # Step 1: Get categories from GitHub
         await status_msg.edit_text(f"📂 Получаю список категорий...")
         categories = await get_categories_from_github()
