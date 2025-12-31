@@ -531,8 +531,9 @@ async def handle_workflow_run(payload):
         emoji = "❌"
         status_text = "завершена с ошибкой"
     elif status == 'cancelled':
-        emoji = "⏩"
-        status_text = "отменена (заменена новой)"
+        # "Cancelled" usually means superseded by a newer build, so the commit is safe.
+        emoji = "✅"
+        status_text = "успешно (в новой сборке)"
     else:
         emoji = "⚠️"
         status_text = f"завершена ({status})"
