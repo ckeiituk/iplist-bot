@@ -8,8 +8,11 @@ import json
 import base64
 import logging
 import asyncio
+import hmac
+import hashlib
 import dns.resolver
 import httpx
+from aiohttp import web
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -25,6 +28,7 @@ TG_TOKEN = os.getenv("TG_TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")  # Optional: channel for reports
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")  # Optional: GitHub webhook secret
 
 # Constants
 GITHUB_REPO = "ckeiituk/iplist"
@@ -32,6 +36,9 @@ GITHUB_BRANCH = "master"
 GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 DNS_SERVERS = ["127.0.0.11:53", "77.88.8.88:53", "8.8.8.8:53", "1.1.1.1:53"]
+
+# Storage for pending builds: {commit_sha: {user_id, domain, chat_id, message_id}}
+pending_builds = {}
 
 
 async def get_categories_from_github() -> list[str]:
@@ -189,7 +196,10 @@ async def create_file_in_github(category: str, domain: str, content: dict) -> st
         response.raise_for_status()
     
     result = response.json()
-    return result["content"]["html_url"]
+    file_url = result["content"]["html_url"]
+    commit_sha = result["commit"]["sha"]
+    return file_url, commit_sha
+
 
 
 async def send_log_report(bot, user, domain: str, category: str, ip4: list, ip6: list, file_url: str) -> None:
@@ -296,7 +306,15 @@ async def add_domain_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         # Create JSON and push to GitHub
         site_json = create_site_json(domain, ip4, ip6)
         await status_msg.edit_text(f"📤 Создаю файл в репозитории...")
-        file_url = await create_file_in_github(matched_cat, domain, site_json)
+        file_url, commit_sha = await create_file_in_github(matched_cat, domain, site_json)
+        
+        # Store for webhook notification
+        pending_builds[commit_sha] = {
+            'user_id': update.effective_user.id,
+            'domain': domain,
+            'chat_id': update.effective_chat.id,
+            'bot': context.bot
+        }
         
         ip_info = []
         if ip4:
@@ -383,7 +401,15 @@ async def handle_domain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         
         # Step 5: Create file in GitHub
         await status_msg.edit_text(f"📤 Создаю файл в репозитории...")
-        file_url = await create_file_in_github(category, domain, site_json)
+        file_url, commit_sha = await create_file_in_github(category, domain, site_json)
+        
+        # Store for webhook notification
+        pending_builds[commit_sha] = {
+            'user_id': update.effective_user.id,
+            'domain': domain,
+            'chat_id': update.effective_chat.id,
+            'bot': context.bot
+        }
         
         # Success message
         ip_info = []
@@ -422,7 +448,126 @@ async def handle_domain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.exception(f"Unexpected error processing {domain}")
 
 
-def main() -> None:
+# ============================================================================
+# GitHub Webhook Handlers
+# ============================================================================
+
+def verify_github_signature(payload_body: bytes, signature_header: str) -> bool:
+    """Verify GitHub webhook signature."""
+    if not WEBHOOK_SECRET:
+        return True  # Skip verification if no secret set
+    
+    if not signature_header:
+        return False
+    
+    hash_algorithm, github_signature = signature_header.split('=')
+    algorithm = hashlib.sha256 if hash_algorithm == 'sha256' else hashlib.sha1
+    encoded_secret = bytes(WEBHOOK_SECRET, 'utf-8')
+    mac = hmac.new(encoded_secret, msg=payload_body, digestmod=algorithm)
+    return hmac.compare_digest(mac.hexdigest(), github_signature)
+
+
+async def handle_github_webhook(request):
+    """Handle incoming GitHub webhook."""
+    try:
+        # Verify signature
+        signature = request.headers.get('X-Hub-Signature-256') or request.headers.get('X-Hub-Signature')
+        payload_body = await request.read()
+        
+        if not verify_github_signature(payload_body, signature):
+            logger.warning("Invalid GitHub webhook signature")
+            return web.Response(status=401, text="Invalid signature")
+        
+        # Parse payload
+        payload = json.loads(payload_body)
+        event_type = request.headers.get('X-GitHub-Event')
+        
+        if event_type == 'workflow_run':
+            await handle_workflow_run(payload)
+        
+        return web.Response(status=200, text="OK")
+    
+    except Exception as e:
+        logger.exception(f"Error handling webhook: {e}")
+        return web.Response(status=500, text="Internal error")
+
+
+async def handle_workflow_run(payload):
+    """Handle workflow_run event from GitHub."""
+    workflow_run = payload.get('workflow_run', {})
+    status = workflow_run.get('conclusion')  # success, failure, cancelled, etc.
+    head_commit = workflow_run.get('head_commit', {})
+    commit_sha = head_commit.get('id', '')
+    
+    # Check if we have a pending build for this commit
+    if commit_sha not in pending_builds:
+        return
+    
+    build_info = pending_builds.pop(commit_sha)
+    user_id = build_info['user_id']
+    domain = build_info['domain']
+    chat_id = build_info['chat_id']
+    
+    # Get workflow details
+    workflow_name = workflow_run.get('name', 'Build')
+    html_url = workflow_run.get('html_url', '')
+    duration = workflow_run.get('run_duration_ms', 0) // 1000  # Convert to seconds
+    
+    # Format duration
+    if duration < 60:
+        duration_str = f"{duration}s"
+    else:
+        minutes = duration // 60
+        seconds = duration % 60
+        duration_str = f"{minutes}m {seconds}s"
+    
+    # Prepare message based on status
+    if status == 'success':
+        emoji = "✅"
+        status_text = "завершена успешно"
+    elif status == 'failure':
+        emoji = "❌"
+        status_text = "завершена с ошибкой"
+    else:
+        emoji = "⚠️"
+        status_text = f"завершена ({status})"
+    
+    message = (
+        f"{emoji} **Сборка {status_text}!**\n\n"
+        f"🌐 Домен: `{domain}`\n"
+        f"📦 Workflow: {workflow_name}\n"
+        f"⏱ Время: {duration_str}\n"
+        f"🔗 [Результат]({html_url})"
+    )
+    
+    # Send notification to user
+    try:
+        bot = build_info.get('bot')
+        if bot:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=message,
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
+    except Exception as e:
+        logger.error(f"Failed to send workflow notification: {e}")
+
+
+async def start_webhook_server(bot):
+    """Start aiohttp webhook server."""
+    app = web.Application()
+    app.router.add_post('/webhook/github', handle_github_webhook)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    logger.info("Webhook server started on port 8080")
+    return runner
+
+
+async def main() -> None:
     """Start the bot."""
     # Validate environment variables
     if not TG_TOKEN:
@@ -441,10 +586,14 @@ def main() -> None:
     application.add_handler(CommandHandler("add", add_domain_manual))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_domain))
     
+    # Start webhook server in background
+    logger.info("Starting webhook server...")
+    webhook_runner = await start_webhook_server(application.bot)
+    
     # Run bot
-    logger.info("Starting bot...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    logger.info("Starting Telegram bot...")
+    await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

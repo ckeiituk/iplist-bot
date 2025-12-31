@@ -11,6 +11,9 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - LOG_CHANNEL_ID=${LOG_CHANNEL_ID}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+    ports:
+      - "8080:8080"
     env_file:
       - .env
     logging:
