@@ -538,7 +538,8 @@ async def handle_workflow_run(payload):
         f"{emoji} **Сборка {status_text}!**\n\n"
         f"🌐 Домен: `{domain}`\n"
         f"📦 Workflow: {workflow_name}\n"
-        f"⏱ Время: {duration_str}"
+        f"⏱ Время: {duration_str}\n\n"
+        f"🔄 **Совет:** Обновите профиль в Clash Verge, чтобы изменения вступили в силу."
     )
     
     # Send notification to user
