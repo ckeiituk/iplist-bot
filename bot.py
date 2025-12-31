@@ -325,8 +325,7 @@ async def add_domain_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await status_msg.edit_text(
             f"✅ Готово!\n\n"
             f"📁 Категория: {matched_cat}\n"
-            f"🌐 {chr(10).join(ip_info)}\n\n"
-            f"🔗 {file_url}"
+            f"🌐 {chr(10).join(ip_info)}"
         )
         
         # Send report to log channel
@@ -421,8 +420,7 @@ async def handle_domain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await status_msg.edit_text(
             f"✅ Готово!\n\n"
             f"📁 Категория: {category}\n"
-            f"🌐 {chr(10).join(ip_info)}\n\n"
-            f"🔗 {file_url}"
+            f"🌐 {chr(10).join(ip_info)}"
         )
         
         # Send report to log channel
