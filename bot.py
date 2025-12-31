@@ -492,6 +492,11 @@ async def handle_github_webhook(request):
 
 async def handle_workflow_run(payload):
     """Handle workflow_run event from GitHub."""
+    # Only process completed workflows
+    action = payload.get('action')
+    if action != 'completed':
+        return
+
     workflow_run = payload.get('workflow_run', {})
     status = workflow_run.get('conclusion')  # success, failure, cancelled, etc.
     head_commit = workflow_run.get('head_commit', {})
@@ -508,7 +513,6 @@ async def handle_workflow_run(payload):
     
     # Get workflow details
     workflow_name = workflow_run.get('name', 'Build')
-    html_url = workflow_run.get('html_url', '')
     duration = workflow_run.get('run_duration_ms', 0) // 1000  # Convert to seconds
     
     # Format duration
@@ -534,8 +538,7 @@ async def handle_workflow_run(payload):
         f"{emoji} **Сборка {status_text}!**\n\n"
         f"🌐 Домен: `{domain}`\n"
         f"📦 Workflow: {workflow_name}\n"
-        f"⏱ Время: {duration_str}\n"
-        f"🔗 [Результат]({html_url})"
+        f"⏱ Время: {duration_str}"
     )
     
     # Send notification to user
