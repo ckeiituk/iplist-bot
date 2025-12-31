@@ -10,6 +10,7 @@ services:
       - TG_TOKEN=${TG_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - LOG_CHANNEL_ID=${LOG_CHANNEL_ID}
     env_file:
       - .env
     logging:

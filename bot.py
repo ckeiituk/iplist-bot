@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 TG_TOKEN = os.getenv("TG_TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")  # Optional: channel for reports
 
 # Constants
 GITHUB_REPO = "ckeiituk/iplist"
@@ -178,6 +179,42 @@ async def create_file_in_github(category: str, domain: str, content: dict) -> st
     return result["content"]["html_url"]
 
 
+async def send_log_report(bot, user, domain: str, category: str, ip4: list, ip6: list, file_url: str) -> None:
+    """Send a report to the log channel."""
+    if not LOG_CHANNEL_ID:
+        return
+    
+    try:
+        from datetime import datetime
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        user_info = f"@{user.username}" if user.username else f"{user.first_name} (ID: {user.id})"
+        
+        ip_info = []
+        if ip4:
+            ip_info.append(f"IPv4: `{', '.join(ip4)}`")
+        if ip6:
+            ip_info.append(f"IPv6: `{', '.join(ip6[:2])}`")  # Limit IPv6 display
+        
+        message = (
+            f"✅ **Добавлен сайт**\n\n"
+            f"🌐 Домен: `{domain}`\n"
+            f"📁 Категория: `{category}`\n"
+            f"👤 Добавил: {user_info}\n"
+            f"🕐 Время: {now}\n"
+            f"🔗 [Файл]({file_url})\n\n"
+            f"{chr(10).join(ip_info)}"
+        )
+        
+        await bot.send_message(
+            chat_id=LOG_CHANNEL_ID,
+            text=message,
+            parse_mode="Markdown",
+            disable_web_page_preview=True
+        )
+    except Exception as e:
+        logger.error(f"Failed to send log report: {e}")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     await update.message.reply_text(
@@ -258,6 +295,9 @@ async def add_domain_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             f"🔗 {file_url}"
         )
         
+        # Send report to log channel
+        await send_log_report(context.bot, update.effective_user, domain, matched_cat, ip4, ip6, file_url)
+        
     except httpx.HTTPStatusError as e:
         error_msg = f"❌ Ошибка API: {e.response.status_code}"
         if e.response.status_code == 422:
@@ -324,6 +364,9 @@ async def handle_domain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             f"🌐 {chr(10).join(ip_info)}\n\n"
             f"🔗 {file_url}"
         )
+        
+        # Send report to log channel
+        await send_log_report(context.bot, update.effective_user, domain, category, ip4, ip6, file_url)
         
     except httpx.HTTPStatusError as e:
         error_msg = f"❌ Ошибка API: {e.response.status_code}"
