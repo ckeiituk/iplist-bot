@@ -3,7 +3,7 @@ import asyncio
 import httpx
 from telegram import Update
 from telegram.ext import ContextTypes
-from config import LOG_CHANNEL_ID
+from config import LOG_CHANNEL_ID, LOG_TOPIC_ID
 from services.gemini import classify_domain, resolve_domain_from_keyword
 from services.dns import resolve_dns
 from services.github import get_categories_from_github, create_site_json, create_file_in_github
@@ -66,11 +66,15 @@ async def add_domain_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(f"📤 Создаю файл в репозитории...")
         html_url, commit_sha = await create_file_in_github(real_category, domain, site_json)
         
+        
         # Track pending build
+        message_thread_id = update.effective_message.message_thread_id if update.effective_message and update.effective_message.is_topic_message else None
+        
         pending_builds[commit_sha] = {
             'user_id': update.effective_user.id,
             'domain': domain,
             'chat_id': update.effective_chat.id,
+            'message_thread_id': message_thread_id,
             'bot': context.bot
         }
 
@@ -141,10 +145,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         html_url, commit_sha = await create_file_in_github(category, domain, site_json)
         
         # Track pending
+        message_thread_id = update.effective_message.message_thread_id if update.effective_message and update.effective_message.is_topic_message else None
+
         pending_builds[commit_sha] = {
             'user_id': update.effective_user.id,
             'domain': domain,
             'chat_id': update.effective_chat.id,
+            'message_thread_id': message_thread_id,
             'bot': context.bot
         }
         
@@ -179,7 +186,12 @@ async def send_log_report(bot, user, domain, category, ip4, ip6, html_url):
             f"📁 Категория: `{category}`\n"
             f"📄 [JSON файл]({html_url})"
         )
-        await bot.send_message(chat_id=LOG_CHANNEL_ID, text=msg, parse_mode="Markdown")
+        
+        kwargs = {"chat_id": LOG_CHANNEL_ID, "text": msg, "parse_mode": "Markdown"}
+        if LOG_TOPIC_ID:
+            kwargs["message_thread_id"] = LOG_TOPIC_ID
+            
+        await bot.send_message(**kwargs)
     except Exception as e:
         logger.error(f"Log report error: {e}")
 

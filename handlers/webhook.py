@@ -81,17 +81,22 @@ async def notify_user_success(sha):
     bot = info['bot']
     chat_id = info['chat_id']
     domain = info['domain']
+    message_thread_id = info.get('message_thread_id')
     
     try:
-        await bot.send_message(
-            chat_id=chat_id,
-            text=(
+        kwargs = {
+            "chat_id": chat_id,
+            "text": (
                 f"✅ **Сборка завершена успешно!**\n"
                 f"Сайт `{domain}` добавлен в списки.\n\n"
                 f"🔄 **Совет:** Обновите профиль в Clash Verge, чтобы изменения вступили в силу."
             ),
-            parse_mode="Markdown"
-        )
+            "parse_mode": "Markdown"
+        }
+        if message_thread_id:
+            kwargs["message_thread_id"] = message_thread_id
+            
+        await bot.send_message(**kwargs)
     except Exception as e:
         logger.error(f"Failed to send success msg: {e}")
 
@@ -102,13 +107,18 @@ async def notify_user_failure(sha):
     bot = info['bot']
     chat_id = info['chat_id']
     domain = info['domain']
+    message_thread_id = info.get('message_thread_id')
     
     try:
-         await bot.send_message(
-            chat_id=chat_id,
-            text=f"❌ **Сборка не удалась!**\nЧто-то пошло не так при добавлении `{domain}`.",
-            parse_mode="Markdown"
-        )
+         kwargs = {
+            "chat_id": chat_id,
+            "text": f"❌ **Сборка не удалась!**\nЧто-то пошло не так при добавлении `{domain}`.",
+            "parse_mode": "Markdown"
+         }
+         if message_thread_id:
+            kwargs["message_thread_id"] = message_thread_id
+            
+         await bot.send_message(**kwargs)
     except Exception as e:
         logger.error(f"Failed to send failure msg: {e}")
 

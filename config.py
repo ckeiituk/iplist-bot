@@ -16,7 +16,20 @@ GEMINI_API_KEYS = [k.strip() for k in os.getenv("GEMINI_API_KEY", "").split(",")
 if not GEMINI_API_KEYS:
     GEMINI_API_KEYS = [""] # Fallback
 
-LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")
+LOG_CHANNEL_ID_RAW = os.getenv("LOG_CHANNEL_ID")
+LOG_CHANNEL_ID = None
+LOG_TOPIC_ID = None
+
+if LOG_CHANNEL_ID_RAW:
+    if ":" in LOG_CHANNEL_ID_RAW:
+        parts = LOG_CHANNEL_ID_RAW.split(":")
+        LOG_CHANNEL_ID = int(parts[0])
+        LOG_TOPIC_ID = int(parts[1])
+    else:
+        try:
+             LOG_CHANNEL_ID = int(LOG_CHANNEL_ID_RAW)
+        except ValueError:
+             LOG_CHANNEL_ID = None
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
 # Constants
