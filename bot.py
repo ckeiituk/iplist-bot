@@ -33,7 +33,7 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")  # Optional: GitHub webhook secret
 # Constants
 GITHUB_REPO = "ckeiituk/iplist"
 GITHUB_BRANCH = "master"
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 DNS_SERVERS = ["127.0.0.11:53", "77.88.8.88:53", "8.8.8.8:53", "1.1.1.1:53"]
 
