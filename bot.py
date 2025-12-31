@@ -263,10 +263,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "👋 Отправь название сервиса или домен:\n\n"
         "• `netflix`\n"
-        "• `greasyfork.org`\n\n"
-        "Команды:\n"
-        "• `/add <домен> <категория>`\n"
-        "• `/categories`"
+        "• `greasyfork.org`"
     )
 
 
