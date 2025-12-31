@@ -35,7 +35,7 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 # Constants
 GITHUB_REPO = "ckeiituk/iplist"
 GITHUB_BRANCH = "master"
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemma-3-12b-it"
 DNS_SERVERS = ["127.0.0.11:53", "77.88.8.88:53", "8.8.8.8:53", "1.1.1.1:53"]
 
 # Authorized users (Update this list as needed or move to env)
