@@ -22,39 +22,35 @@ logger = logging.getLogger(__name__)
 # Environment variables
 TG_TOKEN = os.getenv("TG_TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-AGENTROUTER_KEY = os.getenv("AGENTROUTER_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Constants
 GITHUB_REPO = "ckeiituk/iplist"
 GITHUB_BRANCH = "master"
-AGENTROUTER_BASE_URL = "https://agentrouter.org/v1"
-AGENTROUTER_MODEL = "deepseek-v3.2"
+GEMINI_MODEL = "gemini-2.0-flash"
 
 DNS_SERVERS = ["127.0.0.11:53", "77.88.8.88:53", "8.8.8.8:53", "1.1.1.1:53"]
 
 
-def debug_test_agentrouter():
-    """Test AgentRouter API key on startup."""
+def debug_test_gemini():
+    """Test Gemini API key on startup."""
     import requests
-    logger.info(f"DEBUG: Testing AgentRouter API key (first 10 chars: {AGENTROUTER_KEY[:10] if AGENTROUTER_KEY else 'NONE'}...)")
+    logger.info(f"DEBUG: Testing Gemini API key (first 10 chars: {GEMINI_API_KEY[:10] if GEMINI_API_KEY else 'NONE'}...)")
     try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
         resp = requests.post(
-            f"{AGENTROUTER_BASE_URL}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {AGENTROUTER_KEY}",
-                "Content-Type": "application/json"
-            },
+            url,
+            headers={"Content-Type": "application/json"},
             json={
-                "model": AGENTROUTER_MODEL,
-                "messages": [{"role": "user", "content": "hi"}],
-                "max_tokens": 5
+                "contents": [{"parts": [{"text": "hi"}]}],
+                "generationConfig": {"maxOutputTokens": 10}
             },
             timeout=10
         )
-        logger.info(f"DEBUG AgentRouter response: {resp.status_code} - {resp.text[:200]}")
+        logger.info(f"DEBUG Gemini response: {resp.status_code} - {resp.text[:200]}")
         return resp.status_code == 200
     except Exception as e:
-        logger.error(f"DEBUG AgentRouter error: {e}")
+        logger.error(f"DEBUG Gemini error: {e}")
         return False
 
 async def get_categories_from_github() -> list[str]:
@@ -75,31 +71,26 @@ async def get_categories_from_github() -> list[str]:
 
 
 async def classify_domain(domain: str, categories: list[str]) -> str:
-    """Use AgentRouter API to classify domain into a category."""
-    url = f"{AGENTROUTER_BASE_URL}/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {AGENTROUTER_KEY}",
-        "Content-Type": "application/json"
-    }
+    """Use Gemini API to classify domain into a category."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     
     categories_str = ", ".join(categories)
-    prompt = f"Вот список категорий: [{categories_str}]. К какой категории относится сайт {domain}? Верни только название папки."
+    prompt = f"Вот список категорий: [{categories_str}]. К какой категории относится сайт {domain}? Ответь ТОЛЬКО названием категории, без пояснений."
     
     payload = {
-        "model": AGENTROUTER_MODEL,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
-        "max_tokens": 50,
-        "temperature": 0.1
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "maxOutputTokens": 50,
+            "temperature": 0.1
+        }
     }
     
     async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(url, headers=headers, json=payload)
+        response = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
         response.raise_for_status()
         
     result = response.json()
-    category = result["choices"][0]["message"]["content"].strip().lower()
+    category = result["candidates"][0]["content"]["parts"][0]["text"].strip().lower()
     
     # Validate category exists
     if category not in [c.lower() for c in categories]:
@@ -361,11 +352,11 @@ def main() -> None:
         raise ValueError("TG_TOKEN environment variable is not set")
     if not GITHUB_TOKEN:
         raise ValueError("GITHUB_TOKEN environment variable is not set")
-    if not AGENTROUTER_KEY:
-        raise ValueError("AGENTROUTER_KEY environment variable is not set")
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY environment variable is not set")
     
-    # Debug test AgentRouter
-    debug_test_agentrouter()
+    # Debug test Gemini
+    debug_test_gemini()
     
     # Create application
     application = Application.builder().token(TG_TOKEN).build()
