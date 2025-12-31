@@ -502,18 +502,25 @@ async def handle_workflow_run(payload):
     head_commit = workflow_run.get('head_commit', {})
     commit_sha = head_commit.get('id', '')
     
-    # Check if we have a pending build for this commit
-    if commit_sha not in pending_builds:
+    # Logic for smart notifications:
+    # 1. If status is 'cancelled', we assume it's superseded by a newer build.
+    #    We do NOT remove it from pending_builds and do NOT notify yet.
+    if status == 'cancelled':
+        if commit_sha in pending_builds:
+            logger.info(f"Build {commit_sha} was cancelled. Deferring notification until next success.")
         return
+
+    # 2. Identify the primary commit for this event
+    primary_build_info = None
+    if commit_sha in pending_builds:
+        primary_build_info = pending_builds.pop(commit_sha)
     
-    build_info = pending_builds.pop(commit_sha)
-    user_id = build_info['user_id']
-    domain = build_info['domain']
-    chat_id = build_info['chat_id']
+    # 3. If primary is found, we definitely notify (success or failure)
+    #    If not found (already processed?), we act based on status.
     
     # Get workflow details
     workflow_name = workflow_run.get('name', 'Build')
-    duration = workflow_run.get('run_duration_ms', 0) // 1000  # Convert to seconds
+    duration = workflow_run.get('run_duration_ms', 0) // 1000
     
     # Format duration
     if duration < 60:
@@ -522,42 +529,50 @@ async def handle_workflow_run(payload):
         minutes = duration // 60
         seconds = duration % 60
         duration_str = f"{minutes}m {seconds}s"
-    
-    # Prepare message based on status
+        
+    # Helper to send notification
+    async def notify_user(build_data, is_success):
+        if is_success:
+            emoji = "✅"
+            status_text = "завершена успешно"
+        else:
+            emoji = "❌"
+            status_text = "завершена с ошибкой"
+            
+        msg = (
+            f"{emoji} **Сборка {status_text}!**\n\n"
+            f"🌐 Домен: `{build_data['domain']}`\n"
+            f"📦 Workflow: {workflow_name}\n"
+            f"⏱ Время: {duration_str}\n\n"
+            f"🔄 **Совет:** Обновите профиль в Clash Verge, чтобы изменения вступили в силу."
+        )
+        try:
+            bot_instance = build_data.get('bot')
+            if bot_instance:
+                await bot_instance.send_message(
+                    chat_id=build_data['chat_id'],
+                    text=msg,
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True
+                )
+        except Exception as ex:
+            logger.error(f"Failed to send notification: {ex}")
+
+    # Process primary commit
+    if primary_build_info:
+        await notify_user(primary_build_info, status == 'success')
+        
+    # 4. If status is SUCCESS, we assume this successful build includes ALL content
+    #    from previous 'cancelled' or pending builds in the queue.
+    #    So we flush the entire pending_builds queue and notify them as success.
     if status == 'success':
-        emoji = "✅"
-        status_text = "завершена успешно"
-    elif status == 'failure':
-        emoji = "❌"
-        status_text = "завершена с ошибкой"
-    elif status == 'cancelled':
-        # "Cancelled" usually means superseded by a newer build, so the commit is safe.
-        emoji = "✅"
-        status_text = "успешно (в новой сборке)"
-    else:
-        emoji = "⚠️"
-        status_text = f"завершена ({status})"
-    
-    message = (
-        f"{emoji} **Сборка {status_text}!**\n\n"
-        f"🌐 Домен: `{domain}`\n"
-        f"📦 Workflow: {workflow_name}\n"
-        f"⏱ Время: {duration_str}\n\n"
-        f"🔄 **Совет:** Обновите профиль в Clash Verge, чтобы изменения вступили в силу."
-    )
-    
-    # Send notification to user
-    try:
-        bot = build_info.get('bot')
-        if bot:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=message,
-                parse_mode="Markdown",
-                disable_web_page_preview=True
-            )
-    except Exception as e:
-        logger.error(f"Failed to send workflow notification: {e}")
+        # Get list of all pending SHAs to avoid runtime modification issues
+        pending_shas = list(pending_builds.keys())
+        if pending_shas:
+            logger.info(f"Current build success triggers {len(pending_shas)} deferred notifications.")
+            for sha in pending_shas:
+                deferred_build = pending_builds.pop(sha)
+                await notify_user(deferred_build, is_success=True)
 
 
 async def start_webhook_server(bot):
