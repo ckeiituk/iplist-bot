@@ -4,46 +4,44 @@
 
 ## Возможности
 
-- 🤖 Автоматическая классификация домена через AI (AgentRouter)
+- 🤖 Автоматическая классификация домена через AI (Google Gemini)
 - 🔍 DNS резолвинг (A/AAAA записи)
 - 📤 Создание файла в GitHub репозитории
 
 ## Установка
 
+### Docker (рекомендуется)
+
 ```bash
+git clone https://github.com/ckeiituk/iplist-bot.git
 cd iplist-bot
-python -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-pip install -r requirements.txt
+cp env.example .env
+nano .env  # заполнить токены
+docker compose up -d
 ```
 
-## Настройка
+### Локально
 
-Создай файл `.env`:
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp env.example .env && nano .env
+python bot.py
+```
+
+## Настройка (.env)
 
 ```bash
 TG_TOKEN=токен_от_BotFather
 GITHUB_TOKEN=github_personal_access_token
-AGENTROUTER_KEY=ключ_agentrouter
+GEMINI_API_KEY=ключ_от_aistudio.google.com/apikey
 ```
 
-## Запуск
+## Команды
 
-```bash
-# Вариант 1: прямой запуск
-source .venv/bin/activate
-export $(cat .env | xargs)
-python bot.py
-
-# Вариант 2: с python-dotenv (добавь в requirements.txt)
-python bot.py
-```
-
-## Использование
-
-1. Напиши `/start` боту
-2. Отправь домен, например: `greasyfork.org`
-3. Бот определит категорию, получит IP и создаст файл в репозитории
+- Отправь домен → автоматическая категоризация через AI
+- `/add <домен> <категория>` → ручной выбор категории
+- `/categories` → список доступных категорий
 
 ## Формат JSON
 
