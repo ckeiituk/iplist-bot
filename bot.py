@@ -33,6 +33,30 @@ AGENTROUTER_MODEL = "deepseek-v3.2"
 DNS_SERVERS = ["127.0.0.11:53", "77.88.8.88:53", "8.8.8.8:53", "1.1.1.1:53"]
 
 
+def debug_test_agentrouter():
+    """Test AgentRouter API key on startup."""
+    import requests
+    logger.info(f"DEBUG: Testing AgentRouter API key (first 10 chars: {AGENTROUTER_KEY[:10] if AGENTROUTER_KEY else 'NONE'}...)")
+    try:
+        resp = requests.post(
+            f"{AGENTROUTER_BASE_URL}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {AGENTROUTER_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": AGENTROUTER_MODEL,
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 5
+            },
+            timeout=10
+        )
+        logger.info(f"DEBUG AgentRouter response: {resp.status_code} - {resp.text[:200]}")
+        return resp.status_code == 200
+    except Exception as e:
+        logger.error(f"DEBUG AgentRouter error: {e}")
+        return False
+
 async def get_categories_from_github() -> list[str]:
     """Get list of category folders from GitHub repo config/ directory."""
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/config"
@@ -262,11 +286,16 @@ def main() -> None:
     if not AGENTROUTER_KEY:
         raise ValueError("AGENTROUTER_KEY environment variable is not set")
     
+    # Debug test AgentRouter
+    debug_test_agentrouter()
+    
     # Create application
     application = Application.builder().token(TG_TOKEN).build()
     
     # Add handlers
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("categories", show_categories))
+    application.add_handler(CommandHandler("add", add_domain_manual))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_domain))
     
     # Run bot
