@@ -1,10 +1,11 @@
-version: '3.8'
-
 services:
   iplist-bot:
     build: .
     container_name: iplist-bot
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       - TG_TOKEN=${TG_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
