@@ -7,6 +7,7 @@ from config import LOG_CHANNEL_ID
 from services.gemini import classify_domain, resolve_domain_from_keyword
 from services.dns import resolve_dns
 from services.github import get_categories_from_github, create_site_json, create_file_in_github
+from services.scanner import ScannerService
 from state import pending_builds
 
 logger = logging.getLogger(__name__)
@@ -181,3 +182,38 @@ async def send_log_report(bot, user, domain, category, ip4, ip6, html_url):
         await bot.send_message(chat_id=LOG_CHANNEL_ID, text=msg, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Log report error: {e}")
+
+async def scan_url_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if not args:
+        await update.message.reply_text("Использование: /scan <url>")
+        return
+        
+    url = args[0]
+    status_msg = await update.message.reply_text(f"🕵️‍♀️ Сканирую {url} на наличие скрытых зависимостей...")
+    
+    try:
+        scanner = ScannerService()
+        domains = await scanner.scan_url(url)
+        
+        if not domains:
+             await status_msg.edit_text(f"🤷‍♂️ Доменов не найдено (или ошибка доступа).")
+             return
+             
+        # Filter domains? 
+        # For now, show all unique domains
+        
+        text = f"🔎 Найдены зависимости для {url} ({len(domains)}):\n\n"
+        for d in domains[:20]: # Limit to 20 to avoid spam
+            text += f"`{d}`\n"
+            
+        if len(domains) > 20:
+            text += f"\n...и еще {len(domains)-20}."
+            
+        text += "\n\nЧтобы добавить их, используйте /add <домен> <категория>"
+        
+        await status_msg.edit_text(text, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Scan error: {e}")
+        await status_msg.edit_text(f"❌ Ошибка сканирования: {e}")

@@ -11,7 +11,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 # Import modules
 from config import TG_TOKEN
-from handlers.telegram import start, help_command, add_domain_manual, handle_message
+from handlers.telegram import start, help_command, add_domain_manual, handle_message, scan_url_command
 from handlers.webhook import start_webhook_server
 
 # Configure logging
@@ -32,6 +32,7 @@ async def main():
     # Add Handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("scan", scan_url_command))
     application.add_handler(CommandHandler("add", add_domain_manual))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
