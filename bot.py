@@ -34,27 +34,6 @@ GEMINI_MODEL = "gemini-2.5-flash-lite"
 DNS_SERVERS = ["127.0.0.11:53", "77.88.8.88:53", "8.8.8.8:53", "1.1.1.1:53"]
 
 
-def debug_test_gemini():
-    """Test Gemini API key on startup."""
-    import requests
-    logger.info(f"DEBUG: Testing Gemini API key (first 10 chars: {GEMINI_API_KEY[:10] if GEMINI_API_KEY else 'NONE'}...)")
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-        resp = requests.post(
-            url,
-            headers={"Content-Type": "application/json"},
-            json={
-                "contents": [{"parts": [{"text": "hi"}]}],
-                "generationConfig": {"maxOutputTokens": 10}
-            },
-            timeout=10
-        )
-        logger.info(f"DEBUG Gemini response: {resp.status_code} - {resp.text[:200]}")
-        return resp.status_code == 200
-    except Exception as e:
-        logger.error(f"DEBUG Gemini error: {e}")
-        return False
-
 async def get_categories_from_github() -> list[str]:
     """Get list of category folders from GitHub repo config/ directory."""
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/config"
@@ -452,9 +431,6 @@ def main() -> None:
         raise ValueError("GITHUB_TOKEN environment variable is not set")
     if not GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY environment variable is not set")
-    
-    # Debug test Gemini
-    debug_test_gemini()
     
     # Create application
     application = Application.builder().token(TG_TOKEN).build()
