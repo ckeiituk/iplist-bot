@@ -58,21 +58,16 @@ async def create_file_in_github(category: str, domain: str, content: dict) -> tu
     }
     
     async with httpx.AsyncClient() as client:
-        # Check if file exists to update sha (optional, currently assuming new)
-        # For simplicity in this bot, we try to create. If it exists, it might fail or we should handle it?
-        # The prompt implies "add", let's assume create.
-        # If we really want "upsert", we need SHA.
-        # But looking at original code, it likely just PUTs. 
-        # If file exists, GitHub API requires 'sha'. 
-        # For now let's implement the simpler PUT.
-        # If the user wants to handle updates, we'd GET first.
-        # Since this is a refactor, I should match original behavior.
-        # Original code likely didn't check SHA in 'add_domain', implying it failed if file existed?
-        # Or did I miss it?
-        # Let's check SHA handling if needed.
-        # Wait, if I use PUT without SHA, it creates. If file exists, it 422s.
-        # I'll stick to basic PUT.
-        
+        # Check if file exists to update sha
+        try:
+            get_response = await client.get(url, headers=headers, params={"ref": GITHUB_BRANCH})
+            if get_response.status_code == 200:
+                sha = get_response.json().get("sha")
+                data["sha"] = sha
+                data["message"] = f"fix({category}): update {domain}"
+        except httpx.HTTPError:
+            pass
+            
         response = await client.put(url, headers=headers, json=data)
         response.raise_for_status()
         
