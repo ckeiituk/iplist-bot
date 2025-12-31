@@ -590,10 +590,28 @@ async def main() -> None:
     logger.info("Starting webhook server...")
     webhook_runner = await start_webhook_server(application.bot)
     
-    # Run bot
+    # Initialize and start the bot manually (async-compatible)
     logger.info("Starting Telegram bot...")
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+    
+    logger.info("Bot is running. Press Ctrl+C to stop.")
+    
+    # Keep running until interrupted
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        logger.info("Shutting down...")
+        await application.updater.stop()
+        await application.stop()
+        await application.shutdown()
+        await webhook_runner.cleanup()
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+
