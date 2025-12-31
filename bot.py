@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 """
 Telegram bot for automating site additions to iplist GitHub repository.
+Modularized version.
 """
 
-import os
-import json
-import base64
+import sys
 import logging
 import asyncio
-import hmac
-import hashlib
-import dns.resolver
-import httpx
-from aiohttp import web
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
+
+# Import modules
+from config import TG_TOKEN
+from handlers.telegram import start, help_command, add_domain_manual, handle_message
+from handlers.webhook import start_webhook_server
 
 # Configure logging
 logging.basicConfig(
@@ -23,621 +21,69 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Environment variables
-TG_TOKEN = os.getenv("TG_TOKEN")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")  # Optional: channel for reports
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")  # Optional: GitHub webhook secret
-
-# Constants
-GITHUB_REPO = "ckeiituk/iplist"
-GITHUB_BRANCH = "master"
-GEMINI_MODEL = "gemini-2.5-flash-lite"
-
-DNS_SERVERS = ["127.0.0.11:53", "77.88.8.88:53", "8.8.8.8:53", "1.1.1.1:53"]
-
-# Storage for pending builds: {commit_sha: {user_id, domain, chat_id, message_id}}
-pending_builds = {}
-
-
-async def get_categories_from_github() -> list[str]:
-    """Get list of category folders from GitHub repo config/ directory."""
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/config"
-    headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url, headers=headers, params={"ref": GITHUB_BRANCH})
-        response.raise_for_status()
-        
-    contents = response.json()
-    categories = [item["name"] for item in contents if item["type"] == "dir"]
-    return categories
-
-
-async def classify_domain(domain: str, categories: list[str]) -> str:
-    """Use Gemini API to classify domain into a category."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    
-    categories_str = ", ".join(categories)
-    prompt = f"Вот список категорий: [{categories_str}]. К какой категории относится сайт {domain}? Ответь ТОЛЬКО названием категории, без пояснений."
-    
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "maxOutputTokens": 50,
-            "temperature": 0.1
-        }
-    }
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
-        response.raise_for_status()
-        
-    result = response.json()
-    category = result["candidates"][0]["content"]["parts"][0]["text"].strip().lower()
-    
-    # Validate category exists
-    if category not in [c.lower() for c in categories]:
-        raise ValueError(f"AI вернул неизвестную категорию: {category}")
-    
-    # Return exact category name from list
-    for cat in categories:
-        if cat.lower() == category:
-            return cat
-    
-    return category
-
-
-async def resolve_domain_from_keyword(keyword: str) -> str:
-    """Use Gemini to resolve domain from keyword (e.g. 'netflix' -> 'netflix.com')."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    
-    prompt = (
-        f"Какой основной домен у сервиса '{keyword}'? "
-        f"Верни ТОЛЬКО домен без http://, www. и пояснений. "
-        f"Если не уверен или это не известный сервис, верни 'UNKNOWN'."
-    )
-    
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "maxOutputTokens": 30,
-            "temperature": 0.1
-        }
-    }
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
-        response.raise_for_status()
-        
-    result = response.json()
-    domain = result["candidates"][0]["content"]["parts"][0]["text"].strip().lower()
-    
-    # Clean up response
-    domain = domain.replace("http://", "").replace("https://", "").replace("www.", "").rstrip("/")
-    
-    if "unknown" in domain or len(domain) > 100 or " " in domain:
-        raise ValueError(f"Не удалось определить домен для '{keyword}'")
-    
-    return domain
-
-def resolve_dns(domain: str) -> tuple[list[str], list[str]]:
-    """Resolve A and AAAA records for domain."""
-    ip4 = []
-    ip6 = []
-    
-    resolver = dns.resolver.Resolver()
-    resolver.timeout = 5
-    resolver.lifetime = 10
-    
-    # Resolve A records (IPv4)
-    try:
-        answers = resolver.resolve(domain, 'A')
-        ip4 = [str(rdata) for rdata in answers]
-    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers, dns.exception.Timeout):
-        logger.warning(f"No A records found for {domain}")
-    
-    # Resolve AAAA records (IPv6)
-    try:
-        answers = resolver.resolve(domain, 'AAAA')
-        ip6 = [str(rdata) for rdata in answers]
-    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers, dns.exception.Timeout):
-        logger.warning(f"No AAAA records found for {domain}")
-    
-    return ip4, ip6
-
-
-def create_site_json(domain: str, ip4: list[str], ip6: list[str]) -> dict:
-    """Create JSON structure for the site."""
-    return {
-        "domains": [domain, f"www.{domain}"],
-        "dns": DNS_SERVERS,
-        "timeout": 3600,
-        "ip4": ip4,
-        "ip6": ip6,
-        "cidr4": [],
-        "cidr6": [],
-        "external": {
-            "domains": [],
-            "ip4": [],
-            "ip6": [],
-            "cidr4": [],
-            "cidr6": []
-        }
-    }
-
-
-async def create_file_in_github(category: str, domain: str, content: dict) -> str:
-    """Create a new file in the GitHub repository."""
-    file_path = f"config/{category}/{domain}.json"
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
-    
-    headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    
-    # Encode content to base64
-    json_content = json.dumps(content, indent=4, ensure_ascii=False)
-    content_b64 = base64.b64encode(json_content.encode('utf-8')).decode('utf-8')
-    
-    payload = {
-        "message": f"Add {domain}",
-        "content": content_b64,
-        "branch": GITHUB_BRANCH
-    }
-    
-    async with httpx.AsyncClient() as client:
-        response = await client.put(url, headers=headers, json=payload)
-        response.raise_for_status()
-    
-    result = response.json()
-    file_url = result["content"]["html_url"]
-    commit_sha = result["commit"]["sha"]
-    return file_url, commit_sha
-
-
-
-async def send_log_report(bot, user, domain: str, category: str, ip4: list, ip6: list, file_url: str) -> None:
-    """Send a report to the log channel."""
-    if not LOG_CHANNEL_ID:
-        return
-    
-    try:
-        from datetime import datetime
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        user_info = f"@{user.username}" if user.username else f"{user.first_name} (ID: {user.id})"
-        
-        ip_info = []
-        if ip4:
-            ip_info.append(f"IPv4: `{', '.join(ip4)}`")
-        if ip6:
-            ip_info.append(f"IPv6: `{', '.join(ip6[:2])}`")  # Limit IPv6 display
-        
-        message = (
-            f"✅ **Добавлен сайт**\n\n"
-            f"🌐 Домен: `{domain}`\n"
-            f"📁 Категория: `{category}`\n"
-            f"👤 Добавил: {user_info}\n"
-            f"🕐 Время: {now}\n"
-            f"🔗 [Файл]({file_url})\n\n"
-            f"{chr(10).join(ip_info)}"
-        )
-        
-        # Parse channel_id:topic_id format
-        chat_id = LOG_CHANNEL_ID
-        message_thread_id = None
-        if ":" in LOG_CHANNEL_ID:
-            parts = LOG_CHANNEL_ID.split(":")
-            chat_id = parts[0]
-            message_thread_id = int(parts[1])
-        
-        await bot.send_message(
-            chat_id=chat_id,
-            text=message,
-            message_thread_id=message_thread_id,
-            parse_mode="Markdown",
-            disable_web_page_preview=True
-        )
-    except Exception as e:
-        logger.error(f"Failed to send log report: {e}")
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a message when the command /start is issued."""
-    await update.message.reply_text(
-        "👋 Отправь название сервиса или домен:\n\n"
-        "• `netflix`\n"
-        "• `greasyfork.org`"
-    )
-
-
-async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show available categories."""
-    try:
-        categories = await get_categories_from_github()
-        await update.message.reply_text(
-            f"📂 Доступные категории:\n\n" + "\n".join(f"• {cat}" for cat in sorted(categories))
-        )
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка: {type(e).__name__}")
-        logger.exception("Error fetching categories")
-
-
-async def add_domain_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Add domain with manually specified category."""
-    if len(context.args) < 2:
-        await update.message.reply_text("Использование: /add <домен> <категория>")
-        return
-    
-    domain = context.args[0].lower().replace("https://", "").replace("http://", "").replace("www.", "").rstrip("/")
-    category = context.args[1].lower()
-    
-    status_msg = await update.message.reply_text(f"⏳ Обрабатываю {domain}...")
-    
-    try:
-        # Validate category
-        categories = await get_categories_from_github()
-        matched_cat = None
-        for cat in categories:
-            if cat.lower() == category:
-                matched_cat = cat
-                break
-        
-        if not matched_cat:
-            await status_msg.edit_text(
-                f"❌ Категория '{category}' не найдена.\n\n"
-                f"Доступные: {', '.join(sorted(categories))}"
-            )
-            return
-        
-        # Resolve DNS
-        await status_msg.edit_text(f"🔍 Резолвлю DNS для {domain}...")
-        ip4, ip6 = resolve_dns(domain)
-        
-        if not ip4 and not ip6:
-            await status_msg.edit_text(f"❌ Не удалось получить IP адреса для {domain}.")
-            return
-        
-        # Create JSON and push to GitHub
-        site_json = create_site_json(domain, ip4, ip6)
-        await status_msg.edit_text(f"📤 Создаю файл в репозитории...")
-        file_url, commit_sha = await create_file_in_github(matched_cat, domain, site_json)
-        
-        # Store for webhook notification
-        pending_builds[commit_sha] = {
-            'user_id': update.effective_user.id,
-            'domain': domain,
-            'chat_id': update.effective_chat.id,
-            'bot': context.bot
-        }
-        
-        ip_info = []
-        if ip4:
-            ip_info.append(f"IPv4: {', '.join(ip4)}")
-        if ip6:
-            ip_info.append(f"IPv6: {', '.join(ip6)}")
-        
-        await status_msg.edit_text(
-            f"✅ Готово!\n\n"
-            f"📁 Категория: {matched_cat}\n"
-            f"🌐 {chr(10).join(ip_info)}"
-        )
-        
-        # Send report to log channel
-        await send_log_report(context.bot, update.effective_user, domain, matched_cat, ip4, ip6, file_url)
-        
-    except httpx.HTTPStatusError as e:
-        error_msg = f"❌ Ошибка API: {e.response.status_code}"
-        if e.response.status_code == 422:
-            error_msg += " (файл уже существует?)"
-        await status_msg.edit_text(error_msg)
-    except Exception as e:
-        await status_msg.edit_text(f"❌ Ошибка: {type(e).__name__}")
-        logger.exception(f"Error in add_domain_manual")
-
-
-async def handle_domain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle domain message from user."""
-    domain = update.message.text.strip().lower()
-    
-    # Basic validation - just check not empty
-    if not domain:
-        return
-    
-    # Clean up common prefixes
-    domain = domain.replace("https://", "").replace("http://", "").replace("www.", "").rstrip("/")
-    
-    status_msg = await update.message.reply_text(f"⏳ Обрабатываю {domain}...")
-
-    
-    try:
-        # Step 0: Smart domain resolution (if needed)
-        # Check if it looks like a keyword rather than a domain
-        if "." not in domain:
-            await status_msg.edit_text(f"🔍 Определяю домен для '{domain}'...")
-            try:
-                resolved_domain = await resolve_domain_from_keyword(domain)
-                await status_msg.edit_text(
-                    f"✅ Найден домен: `{resolved_domain}`\n\n"
-                    f"Продолжаю обработку..."
-                )
-                domain = resolved_domain
-                await asyncio.sleep(1)  # Give user time to see
-            except ValueError as e:
-                await status_msg.edit_text(
-                    f"❓ {str(e)}\n\n"
-                    f"Уточни полный домен или используй /add <домен> <категория>"
-                )
-                return
-        
-        # Step 1: Get categories from GitHub
-        await status_msg.edit_text(f"📂 Получаю список категорий...")
-        categories = await get_categories_from_github()
-        
-        if not categories:
-            await status_msg.edit_text("❌ Не удалось получить категории из репозитория.")
-            return
-        
-        # Step 2: Classify domain using AI
-        await status_msg.edit_text(f"🤖 Определяю категорию для {domain}...")
-        category = await classify_domain(domain, categories)
-        
-        # Step 3: Resolve DNS
-        await status_msg.edit_text(f"🔍 Резолвлю DNS для {domain}...")
-        ip4, ip6 = resolve_dns(domain)
-        
-        if not ip4 and not ip6:
-            await status_msg.edit_text(f"❌ Не удалось получить IP адреса для {domain}. Домен не резолвится.")
-            return
-        
-        # Step 4: Create JSON
-        site_json = create_site_json(domain, ip4, ip6)
-        
-        # Step 5: Create file in GitHub
-        await status_msg.edit_text(f"📤 Создаю файл в репозитории...")
-        file_url, commit_sha = await create_file_in_github(category, domain, site_json)
-        
-        # Store for webhook notification
-        pending_builds[commit_sha] = {
-            'user_id': update.effective_user.id,
-            'domain': domain,
-            'chat_id': update.effective_chat.id,
-            'bot': context.bot
-        }
-        
-        # Success message
-        ip_info = []
-        if ip4:
-            ip_info.append(f"IPv4: {', '.join(ip4)}")
-        if ip6:
-            ip_info.append(f"IPv6: {', '.join(ip6)}")
-        
-        await status_msg.edit_text(
-            f"✅ Готово!\n\n"
-            f"📁 Категория: {category}\n"
-            f"🌐 {chr(10).join(ip_info)}"
-        )
-        
-        # Send report to log channel
-        await send_log_report(context.bot, update.effective_user, domain, category, ip4, ip6, file_url)
-        
-    except httpx.HTTPStatusError as e:
-        error_msg = f"❌ Ошибка API: {e.response.status_code}"
-        if e.response.status_code == 401:
-            error_msg += " (проверь токены)"
-        elif e.response.status_code == 404:
-            error_msg += " (репозиторий или путь не найден)"
-        elif e.response.status_code == 422:
-            error_msg += " (файл уже существует?)"
-        await status_msg.edit_text(error_msg)
-        logger.error(f"HTTP Error: {e}")
-        
-    except ValueError as e:
-        await status_msg.edit_text(f"❌ {str(e)}")
-        logger.error(f"Value Error: {e}")
-        
-    except Exception as e:
-        await status_msg.edit_text(f"❌ Непредвиденная ошибка: {type(e).__name__}")
-        logger.exception(f"Unexpected error processing {domain}")
-
-
-# ============================================================================
-# GitHub Webhook Handlers
-# ============================================================================
-
-def verify_github_signature(payload_body: bytes, signature_header: str) -> bool:
-    """Verify GitHub webhook signature."""
-    if not WEBHOOK_SECRET:
-        return True  # Skip verification if no secret set
-    
-    if not signature_header:
-        return False
-    
-    hash_algorithm, github_signature = signature_header.split('=')
-    algorithm = hashlib.sha256 if hash_algorithm == 'sha256' else hashlib.sha1
-    encoded_secret = bytes(WEBHOOK_SECRET, 'utf-8')
-    mac = hmac.new(encoded_secret, msg=payload_body, digestmod=algorithm)
-    return hmac.compare_digest(mac.hexdigest(), github_signature)
-
-
-async def handle_github_webhook(request):
-    """Handle incoming GitHub webhook."""
-    try:
-        # Verify signature
-        signature = request.headers.get('X-Hub-Signature-256') or request.headers.get('X-Hub-Signature')
-        payload_body = await request.read()
-        
-        if not verify_github_signature(payload_body, signature):
-            logger.warning("Invalid GitHub webhook signature")
-            return web.Response(status=401, text="Invalid signature")
-        
-        # Parse payload
-        payload = json.loads(payload_body)
-        event_type = request.headers.get('X-GitHub-Event')
-        
-        if event_type == 'workflow_run':
-            await handle_workflow_run(payload)
-        
-        return web.Response(status=200, text="OK")
-    
-    except Exception as e:
-        logger.exception(f"Error handling webhook: {e}")
-        return web.Response(status=500, text="Internal error")
-
-
-async def handle_workflow_run(payload):
-    """Handle workflow_run event from GitHub."""
-    # Only process completed workflows
-    action = payload.get('action')
-    if action != 'completed':
-        return
-
-    workflow_run = payload.get('workflow_run', {})
-    status = workflow_run.get('conclusion')  # success, failure, cancelled, etc.
-    head_commit = workflow_run.get('head_commit', {})
-    commit_sha = head_commit.get('id', '')
-    
-    workflow_run = payload.get('workflow_run', {})
-    status = workflow_run.get('conclusion')  # success, failure, cancelled, etc.
-    head_commit = workflow_run.get('head_commit', {})
-    commit_sha = head_commit.get('id', '')
-    
-    # Logic for smart notifications:
-    # 1. If status is 'cancelled', we assume it's superseded by a newer build.
-    #    We do NOT remove it from pending_builds and do NOT notify yet.
-    if status == 'cancelled':
-        if commit_sha in pending_builds:
-            logger.info(f"Build {commit_sha} was cancelled. Deferring notification until next success.")
-        return
-
-    # 2. Identify the primary commit for this event
-    primary_build_info = None
-    if commit_sha in pending_builds:
-        primary_build_info = pending_builds.pop(commit_sha)
-    
-    # 3. If primary is found, we definitely notify (success or failure)
-    #    If not found (already processed?), we act based on status.
-    
-    # Get workflow details
-    workflow_name = workflow_run.get('name', 'Build')
-    duration = workflow_run.get('run_duration_ms', 0) // 1000  # Convert to seconds
-    
-    # Format duration
-    if duration < 60:
-        duration_str = f"{duration}s"
-    else:
-        minutes = duration // 60
-        seconds = duration % 60
-        duration_str = f"{minutes}m {seconds}s"
-        
-    # Helper to send notification
-    async def notify_user(build_data, is_success):
-        if is_success:
-            emoji = "✅"
-            status_text = "завершена успешно"
-        else:
-            emoji = "❌"
-            status_text = "завершена с ошибкой"
-            
-        msg = (
-            f"{emoji} **Сборка {status_text}!**\n\n"
-            f"🌐 Домен: `{build_data['domain']}`\n"
-            f"📦 Workflow: {workflow_name}\n"
-            f"⏱ Время: {duration_str}\n\n"
-            f"🔄 **Совет:** Обновите профиль в Clash Verge, чтобы изменения вступили в силу."
-        )
-        try:
-            bot_instance = build_data.get('bot')
-            if bot_instance:
-                await bot_instance.send_message(
-                    chat_id=build_data['chat_id'],
-                    text=msg,
-                    parse_mode="Markdown",
-                    disable_web_page_preview=True
-                )
-        except Exception as ex:
-            logger.error(f"Failed to send notification: {ex}")
-
-    # Process primary commit
-    if primary_build_info:
-        await notify_user(primary_build_info, status == 'success')
-        
-    # 4. If status is SUCCESS, we assume this successful build includes ALL content
-    #    from previous 'cancelled' or pending builds in the queue.
-    #    So we flush the entire pending_builds queue and notify them as success.
-    if status == 'success':
-        # Get list of all pending SHAs to avoid runtime modification issues
-        pending_shas = list(pending_builds.keys())
-        if pending_shas:
-            logger.info(f"Current build success triggers {len(pending_shas)} deferred notifications.")
-            for sha in pending_shas:
-                deferred_build = pending_builds.pop(sha)
-                await notify_user(deferred_build, is_success=True)
-
-
-async def start_webhook_server(bot):
-    """Start aiohttp webhook server."""
-    app = web.Application()
-    app.router.add_post('/webhook/github', handle_github_webhook)
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8081)
-    await site.start()
-    logger.info("Webhook server started on port 8081")
-    return runner
-
-
-async def main() -> None:
-    """Start the bot."""
-    # Validate environment variables
+async def main():
     if not TG_TOKEN:
-        raise ValueError("TG_TOKEN environment variable is not set")
-    if not GITHUB_TOKEN:
-        raise ValueError("GITHUB_TOKEN environment variable is not set")
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY environment variable is not set")
-    
-    # Create application
+        logger.error("TG_TOKEN not set!")
+        sys.exit(1)
+        
+    # Build Telegram App
     application = Application.builder().token(TG_TOKEN).build()
     
-    # Add handlers
+    # Add Handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("categories", show_categories))
+    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("add", add_domain_manual))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_domain))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # Start webhook server in background
-    logger.info("Starting webhook server...")
-    webhook_runner = await start_webhook_server(application.bot)
+    # Start Webhook Server (Background task)
+    webhook_task = asyncio.create_task(start_webhook_server())
     
-    # Initialize and start the bot manually (async-compatible)
-    logger.info("Starting Telegram bot...")
+    # Start Bot
+    logger.info("Starting bot...")
+    
+    # Run bot polling
+    # We use stop_signals=None because we handle cleanup via asyncio.run/finally implicitly or via OS signals
+    # But Application.run_polling is blocking. So we need to ensure webhook runs.
+    # Fortunately, run_polling is async aware if we used the async updater logic, 
+    # but the recommended way for modern ptb + background tasks is: 
+    # use `await application.initialize()`, `await application.start()`, `await application.updater.start_polling()`
+    # OR just pass allowed_updates to run_polling and let the loop run.
+    # However, create_task works fine before a blocking compatible run call IF it uses the same loop.
+    # application.run_polling() creates its own loop? No, usually it uses the current one if called inside async def.
+    # Let's verify PTB docs mental model:
+    # "If you use asyncio.run(main()), use application.run_polling() inside."
+    
     await application.initialize()
     await application.start()
-    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+    await application.updater.start_polling()
     
-    logger.info("Bot is running. Press Ctrl+C to stop.")
+    # Keep running until cancelled
+    # We await the webhook task too, or just wait forever
+    logger.info("Both services are running.")
     
-    # Keep running until interrupted
     try:
-        while True:
-            await asyncio.sleep(3600)
-    except asyncio.CancelledError:
+        # Wait until the updater stops (it won't unless signal)
+        # But updater.start_polling is non-blocking (it starts a task).
         pass
-    finally:
-        logger.info("Shutting down...")
-        await application.updater.stop()
-        await application.stop()
-        await application.shutdown()
-        await webhook_runner.cleanup()
+    except Exception:
+        pass
+        
+    # We need a forever loop here because start_polling is essentially backgrounded tasks now?
+    # No, start_polling starts the fetching task.
+    # So we need to keep main alive.
+    stop_signal = asyncio.Event()
+    await stop_signal.wait()
 
+    # Graceful shutdown (if we ever reach here)
+    await application.updater.stop()
+    await application.stop()
+    await application.shutdown()
 
 if __name__ == "__main__":
-    asyncio.run(main())
-
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
