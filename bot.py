@@ -352,16 +352,15 @@ async def handle_domain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """Handle domain message from user."""
     domain = update.message.text.strip().lower()
     
-    # Basic domain validation
-    if not domain or " " in domain or "/" in domain:
-        await update.message.reply_text("❌ Неверный формат домена. Отправь домен без http:// и пробелов.")
+    # Basic validation - just check not empty
+    if not domain:
         return
     
-    # Remove common prefixes if present
-    domain = domain.replace("https://", "").replace("http://", "").replace("www.", "")
-    domain = domain.rstrip("/")
+    # Clean up common prefixes
+    domain = domain.replace("https://", "").replace("http://", "").replace("www.", "").rstrip("/")
     
     status_msg = await update.message.reply_text(f"⏳ Обрабатываю {domain}...")
+
     
     try:
         # Step 0: Smart domain resolution (if needed)
