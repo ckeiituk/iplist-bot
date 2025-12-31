@@ -530,6 +530,9 @@ async def handle_workflow_run(payload):
     elif status == 'failure':
         emoji = "❌"
         status_text = "завершена с ошибкой"
+    elif status == 'cancelled':
+        emoji = "⏩"
+        status_text = "отменена (заменена новой)"
     else:
         emoji = "⚠️"
         status_text = f"завершена ({status})"
