@@ -206,9 +206,18 @@ async def send_log_report(bot, user, domain: str, category: str, ip4: list, ip6:
             f"{chr(10).join(ip_info)}"
         )
         
+        # Parse channel_id:topic_id format
+        chat_id = LOG_CHANNEL_ID
+        message_thread_id = None
+        if ":" in LOG_CHANNEL_ID:
+            parts = LOG_CHANNEL_ID.split(":")
+            chat_id = parts[0]
+            message_thread_id = int(parts[1])
+        
         await bot.send_message(
-            chat_id=LOG_CHANNEL_ID,
+            chat_id=chat_id,
             text=message,
+            message_thread_id=message_thread_id,
             parse_mode="Markdown",
             disable_web_page_preview=True
         )
