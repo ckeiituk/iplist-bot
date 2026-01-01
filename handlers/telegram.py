@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привет! Отправь мне домен (например, `netflix.com` или просто `netflix`), "
-        "и я добавлю его в репозиторий iplist."
+        "Привет! Отправь мне домен сайта, "
+        "и я добавлю его в правила VPN клиента."
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
