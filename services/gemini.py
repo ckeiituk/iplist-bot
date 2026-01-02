@@ -81,6 +81,9 @@ async def classify_domain(domain: str, categories: list[str]) -> str:
         logger.warning(f"Web search failed for {domain}: {e}")
         search_results = "Search unavailable."
 
+    logger.info(f"Classifying domain: {domain}")
+    logger.info(f"Search results for {domain}:\n{search_results}")
+    
     categories_str = ", ".join(categories)
     prompt = (
         f"Context from web search for {domain}:\n"
@@ -89,8 +92,11 @@ async def classify_domain(domain: str, categories: list[str]) -> str:
         f"Answer ONLY with the name of the category from the list, without explanation."
     )
     
+    logger.info(f"Gemini Prompt:\n{prompt}")
+
     try:
         category_text = await call_gemini_api(prompt, max_tokens=50)
+        logger.info(f"Gemini Raw Response: {category_text}")
         category = category_text.lower()
     except Exception as e:
         logger.error(f"Classify domain failed: {e}")
