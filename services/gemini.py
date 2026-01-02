@@ -84,6 +84,17 @@ async def classify_domain(domain: str, categories: list[str]) -> str:
         logger.warning(f"Web search failed for {domain}: {e}")
         
     if not search_results or "No search results found" in search_results:
+        # Proceed to fallback immediately if no results
+        pass
+    else:
+        # Heuristic: Check if the domain name (SLD) appears in the search results.
+        # This prevents using irrelevant results (e.g. "prepa.org" for "notbad.cloud")
+        domain_sld = domain.split('.')[0].lower()
+        if domain_sld not in search_results.lower():
+             logger.warning(f"Search results for {domain} seem irrelevant (SLD '{domain_sld}' not found). Triggering fallback.")
+             search_results = "" # Clear results to force fallback
+             
+    if not search_results or "No search results found" in search_results:
         logger.info(f"Search yielded no results for {domain}. Attempting direct page fetch.")
         context_source = "page content"
         try:
