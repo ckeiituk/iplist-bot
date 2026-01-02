@@ -86,7 +86,7 @@ async def classify_domain(domain: str, categories: list[str]) -> str:
         f"Context from web search for {domain}:\n"
         f"{search_results}\n\n"
         f"Based on this context and the domain name, which of these categories fits best: [{categories_str}]? "
-        f"Ответь ТОЛЬКО названием категории из списка, без пояснений."
+        f"Answer ONLY with the name of the category from the list, without explanation."
     )
     
     try:
