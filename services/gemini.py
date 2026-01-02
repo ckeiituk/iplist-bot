@@ -1,7 +1,7 @@
 import httpx
 import logging
 from config import GEMINI_API_KEYS, GEMINI_MODEL
-from services.search import search_web
+from services.search import search_web, fetch_page_content
 
 logger = logging.getLogger(__name__)
 
@@ -75,18 +75,31 @@ async def classify_domain(domain: str, categories: list[str]) -> str:
     """Use Gemini API to classify domain into a category."""
     
     # Perform web search to get context
+    context_source = "web search"
+    search_results = ""
+    
     try:
         search_results = search_web(domain, num_results=3)
     except Exception as e:
         logger.warning(f"Web search failed for {domain}: {e}")
-        search_results = "Search unavailable."
+        
+    if not search_results or "No search results found" in search_results:
+        logger.info(f"Search yielded no results for {domain}. Attempting direct page fetch.")
+        context_source = "page content"
+        try:
+            search_results = await fetch_page_content(domain)
+            if not search_results:
+                search_results = "No content available."
+        except Exception as e:
+             logger.warning(f"Page fetch failed for {domain}: {e}")
+             search_results = "Content unavailable."
 
     logger.info(f"Classifying domain: {domain}")
-    logger.info(f"Search results for {domain}:\n{search_results}")
-    
+    logger.info(f"Context ({context_source}) for {domain}:\n{search_results[:500]}...") # Log 500 chars
+
     categories_str = ", ".join(categories)
     prompt = (
-        f"Context from web search for {domain}:\n"
+        f"Context from {context_source} for {domain}:\n"
         f"{search_results}\n\n"
         f"Based on this context and the domain name, which of these categories fits best: [{categories_str}]? "
         f"Answer ONLY with the name of the category from the list, without explanation."
