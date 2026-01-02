@@ -43,7 +43,7 @@ def search_web(query: str, num_results: int = 3) -> str:
     Each result includes the title and snippet.
     """
     try:
-        results = DDGS().text(query, max_results=num_results)
+        results = DDGS().text(query, max_results=num_results, backend='html')
         if not results:
             return "No search results found."
         
