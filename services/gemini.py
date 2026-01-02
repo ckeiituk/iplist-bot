@@ -1,6 +1,7 @@
 import httpx
 import logging
 from config import GEMINI_API_KEYS, GEMINI_MODEL
+from services.search import search_web
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,22 @@ async def call_gemini_api(prompt: str, max_tokens: int = 50) -> str:
 
 async def classify_domain(domain: str, categories: list[str]) -> str:
     """Use Gemini API to classify domain into a category."""
+    
+    # Perform web search to get context
+    try:
+        search_results = search_web(domain, num_results=3)
+    except Exception as e:
+        logger.warning(f"Web search failed for {domain}: {e}")
+        search_results = "Search unavailable."
+
     categories_str = ", ".join(categories)
-    prompt = f"Вот список категорий: [{categories_str}]. К какой категории относится сайт {domain}? Ответь ТОЛЬКО названием категории, без пояснений."
+    prompt = (
+        f"Context from web search for {domain}:\n"
+        f"{search_results}\n\n"
+        f"Based on this context and the domain name, which of these categories fits best: [{categories_str}]? "
+        f"Example: 'notbad.cloud' -> 'hosting'. "
+        f"Ответь ТОЛЬКО названием категории, без пояснений."
+    )
     
     try:
         category_text = await call_gemini_api(prompt, max_tokens=50)
