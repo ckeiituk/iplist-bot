@@ -6,8 +6,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy bot code
-COPY . .
+# Copy bot code into bot/ subdirectory for proper package structure
+COPY . ./bot/
 
 # Run as non-root user
 RUN useradd -m -u 1000 botuser && chown -R botuser:botuser /app
