@@ -1,35 +1,69 @@
-import dns.resolver
-import logging
-from config import DNS_SERVERS
+"""
+DNS resolution service.
+"""
 
-logger = logging.getLogger(__name__)
+import dns.resolver
+from bot.core.logging import get_logger
+from bot.core.exceptions import DNSResolutionError
+
+logger = get_logger(__name__)
+
+
+class DNSResolver:
+    """DNS resolver for domain IP lookups."""
+    
+    def __init__(self, timeout: int = 5, lifetime: int = 10):
+        self._resolver = dns.resolver.Resolver()
+        self._resolver.timeout = timeout
+        self._resolver.lifetime = lifetime
+    
+    def resolve(self, domain: str) -> tuple[list[str], list[str]]:
+        """
+        Resolve A and AAAA records for domain.
+        
+        Args:
+            domain: Domain name to resolve
+            
+        Returns:
+            Tuple of (ipv4_list, ipv6_list)
+        """
+        ip4 = self._resolve_a(domain)
+        ip6 = self._resolve_aaaa(domain)
+        return ip4, ip6
+    
+    def _resolve_a(self, domain: str) -> list[str]:
+        """Resolve A (IPv4) records."""
+        try:
+            answers = self._resolver.resolve(domain, "A")
+            return [str(rdata) for rdata in answers]
+        except (
+            dns.resolver.NXDOMAIN,
+            dns.resolver.NoAnswer,
+            dns.resolver.NoNameservers,
+            dns.exception.Timeout,
+        ):
+            logger.warning(f"No A records found for {domain}")
+            return []
+    
+    def _resolve_aaaa(self, domain: str) -> list[str]:
+        """Resolve AAAA (IPv6) records."""
+        try:
+            answers = self._resolver.resolve(domain, "AAAA")
+            return [str(rdata) for rdata in answers]
+        except (
+            dns.resolver.NXDOMAIN,
+            dns.resolver.NoAnswer,
+            dns.resolver.NoNameservers,
+            dns.exception.Timeout,
+        ):
+            logger.warning(f"No AAAA records found for {domain}")
+            return []
+
+
+# Default resolver instance
+default_resolver = DNSResolver()
+
 
 def resolve_dns(domain: str) -> tuple[list[str], list[str]]:
-    """Resolve A and AAAA records for domain."""
-    ip4 = []
-    ip6 = []
-    
-    resolver = dns.resolver.Resolver()
-    resolver.timeout = 5
-    resolver.lifetime = 10
-    
-    # Optional: configure specific nameservers if needed
-    # resolver.nameservers = ['8.8.8.8'] # The bot uses system resolver or custom logic? 
-    # The original code imported DNS_SERVERS but didn't seem to apply them to the resolver object explicitly 
-    # in the snippet I saw. It used them for JSON output.
-    
-    # Resolve A records (IPv4)
-    try:
-        answers = resolver.resolve(domain, 'A')
-        ip4 = [str(rdata) for rdata in answers]
-    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers, dns.exception.Timeout):
-        logger.warning(f"No A records found for {domain}")
-    
-    # Resolve AAAA records (IPv6)
-    try:
-        answers = resolver.resolve(domain, 'AAAA')
-        ip6 = [str(rdata) for rdata in answers]
-    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers, dns.exception.Timeout):
-        logger.warning(f"No AAAA records found for {domain}")
-    
-    return ip4, ip6
+    """Convenience function using default resolver."""
+    return default_resolver.resolve(domain)
