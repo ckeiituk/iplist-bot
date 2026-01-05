@@ -18,7 +18,7 @@ class TestBaseHandlers:
         
         mock_update.message.reply_text.assert_called_once()
         call_args = mock_update.message.reply_text.call_args[0][0]
-        assert "Привет" in call_args
+        assert "Главное меню" in call_args
     
     @pytest.mark.asyncio
     async def test_help_command(self, mock_update, mock_context):

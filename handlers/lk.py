@@ -71,7 +71,12 @@ def _period_label(period: str) -> str:
     return mapping.get(period, period or "—")
 
 
-def _build_summary_text(payload: dict[str, Any]) -> str:
+def _summary_title(title: str) -> str:
+    icon = "🏠" if title == "Главное меню" else "📊"
+    return f"{icon} {title}"
+
+
+def _build_summary_text(payload: dict[str, Any], *, title: str = "Личный кабинет") -> str:
     user = payload.get("user", {})
     summary = payload.get("summary", {})
     name = user.get("name") or "—"
@@ -80,13 +85,13 @@ def _build_summary_text(payload: dict[str, Any]) -> str:
     overdue_count = summary.get("overdue_count", 0)
 
     lines = [
-        "Личный кабинет",
-        f"Пользователь: {name}",
-        f"Баланс: {_format_amount(summary.get('effective_balance'))}",
-        f"Ожидают оплаты: {_format_amount(summary.get('pending_debt'))}",
-        f"Подписки в месяц: {_format_amount(summary.get('monthly_subscriptions_total'))}",
-        f"Займы: {_format_amount(summary.get('loan_total'))}",
-        f"Платежи: ожидают {pending_count}, просрочены {overdue_count}",
+        _summary_title(title),
+        f"👤 {name}",
+        f"💳 Баланс: {_format_amount(user.get('balance'))} · Доступно: {_format_amount(summary.get('effective_balance'))}",
+        f"📌 К оплате: {_format_amount(summary.get('pending_debt'))}",
+        f"🔁 Подписки/мес: {_format_amount(summary.get('monthly_subscriptions_total'))}",
+        f"💸 Займы: {_format_amount(summary.get('loan_total'))}",
+        f"🧾 Платежи: ожидают {pending_count} · просрочено {overdue_count}",
     ]
     return "\n".join(lines)
 
@@ -99,9 +104,9 @@ def _build_balance_text(payload: dict[str, Any]) -> str:
     pending_debt = summary.get("pending_debt")
 
     lines = [
-        "Баланс",
+        "💳 Баланс",
         f"На счету: {_format_amount(balance)}",
-        f"Ожидают оплаты: {_format_amount(pending_debt)}",
+        f"К оплате: {_format_amount(pending_debt)}",
         f"Доступно: {_format_amount(effective_balance)}",
     ]
     return "\n".join(lines)
@@ -116,7 +121,7 @@ def _build_history_text(history_payload: dict[str, Any]) -> str:
     if not transactions:
         return "История операций пуста."
 
-    header = f"История операций (стр. {page}/{total_pages or 1})"
+    header = f"🧾 История операций (стр. {page}/{total_pages or 1})"
     lines = [header]
     for item in transactions:
         direction = item.get("type")
@@ -143,7 +148,7 @@ def _build_subscriptions_text(payload: dict[str, Any]) -> str:
     if not subscriptions:
         return "Подписок нет."
 
-    lines = ["Подписки:"]
+    lines = ["🔁 Подписки"]
     for item in subscriptions[:_MAX_ITEMS]:
         name = item.get("name") or "—"
         amount = _format_amount(item.get("amount"))
@@ -161,7 +166,7 @@ def _build_loans_text(payload: dict[str, Any]) -> str:
     if not loans:
         return "Займов нет."
 
-    lines = ["Займы:"]
+    lines = ["💸 Займы"]
     for item in loans[:_MAX_ITEMS]:
         name = item.get("name") or "—"
         amount = _format_amount(item.get("amount"))
@@ -173,6 +178,16 @@ def _build_loans_text(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _status_label(raw: str | None) -> str:
+    mapping = {
+        "pending": "ожидает",
+        "paid": "оплачен",
+        "overdue": "просрочен",
+        "cancelled": "отменен",
+    }
+    return mapping.get((raw or "").lower(), raw or "—")
+
+
 def _build_payments_text(payload: dict[str, Any]) -> str:
     payments = payload.get("payments") or {}
     pending = payments.get("pending") or []
@@ -180,27 +195,27 @@ def _build_payments_text(payload: dict[str, Any]) -> str:
 
     lines = []
     if pending:
-        lines.append("Ожидают оплаты:")
+        lines.append("⏳ Ожидают оплаты")
         for item in pending[:_MAX_ITEMS]:
             comment = _truncate(item.get("comment") or "Платеж")
             amount = _format_amount(item.get("amount"))
-            status = item.get("status") or "—"
+            status = _status_label(item.get("status"))
             due = _format_date(item.get("due_date"))
-            lines.append(f"• #{item.get('id')} — {amount} • {status} • {due} • {comment}")
+            lines.append(f"• #{item.get('id')} — {amount} · {due} · {status} · {comment}")
         if len(pending) > _MAX_ITEMS:
             lines.append(f"…и еще {len(pending) - _MAX_ITEMS}")
     else:
-        lines.append("Ожидающих платежей нет.")
+        lines.append("⏳ Ожидающих платежей нет.")
 
     if recent:
         lines.append("")
-        lines.append("Последние платежи:")
+        lines.append("✅ Последние платежи")
         for item in recent[:_MAX_ITEMS]:
             comment = _truncate(item.get("comment") or "Платеж")
             amount = _format_amount(item.get("amount"))
-            status = item.get("status") or "—"
+            status = _status_label(item.get("status"))
             paid_at = _format_date(item.get("paid_at") or item.get("created_at"))
-            lines.append(f"• #{item.get('id')} — {amount} • {status} • {paid_at} • {comment}")
+            lines.append(f"• #{item.get('id')} — {amount} · {paid_at} · {status} · {comment}")
         if len(recent) > _MAX_ITEMS:
             lines.append(f"…и еще {len(recent) - _MAX_ITEMS}")
 
@@ -214,17 +229,20 @@ def _build_nav_keyboard(
     history_payload: dict[str, Any] | None = None,
 ) -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton("Главное меню", callback_data="menu:main")],
+        [
+            InlineKeyboardButton("Главное меню", callback_data="menu:main"),
+            InlineKeyboardButton("Обновить", callback_data="lk:refresh"),
+        ],
         [
             InlineKeyboardButton("Сводка", callback_data="lk:summary"),
-            InlineKeyboardButton("Баланс", callback_data="lk:balance"),
-        ],
-        [
-            InlineKeyboardButton("История", callback_data="lk:history:1"),
-            InlineKeyboardButton("Подписки", callback_data="lk:subscriptions"),
-        ],
-        [
             InlineKeyboardButton("Платежи", callback_data="lk:payments"),
+        ],
+        [
+            InlineKeyboardButton("Баланс", callback_data="lk:balance"),
+            InlineKeyboardButton("История", callback_data="lk:history:1"),
+        ],
+        [
+            InlineKeyboardButton("Подписки", callback_data="lk:subscriptions"),
             InlineKeyboardButton("Займы", callback_data="lk:loans"),
         ],
     ]
@@ -249,7 +267,6 @@ def _build_nav_keyboard(
                 InlineKeyboardButton(f"Оплатил #{payment_id}", callback_data=f"lk:paid:{payment_id}")
             ])
 
-    buttons.append([InlineKeyboardButton("Обновить", callback_data="lk:refresh")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -270,6 +287,19 @@ def _select_section_text(
     if section == "history" and history_payload is not None:
         return _build_history_text(history_payload)
     return _build_summary_text(payload)
+
+
+def build_menu_summary_text(payload: dict[str, Any]) -> str:
+    return _build_summary_text(payload, title="Главное меню")
+
+
+async def fetch_lk_payload(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    return await _fetch_payload(update, context, force_refresh=force_refresh)
 
 
 def _get_cached_payload(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any] | None:

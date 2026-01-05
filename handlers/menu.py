@@ -5,25 +5,31 @@ from __future__ import annotations
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from bot.core.config import settings
+from bot.core.exceptions import CollectorAPIError
+from bot.handlers.lk import build_menu_summary_text, fetch_lk_payload
 from bot.handlers.ui import send_or_edit_primary
 
 
 def _build_main_menu_keyboard() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton("Личный кабинет", callback_data="menu:lk")],
+        [
+            InlineKeyboardButton("Сводка", callback_data="menu:lk"),
+            InlineKeyboardButton("Платежи", callback_data="menu:payments"),
+        ],
+        [
+            InlineKeyboardButton("Подписки", callback_data="menu:subscriptions"),
+            InlineKeyboardButton("Займы", callback_data="menu:loans"),
+        ],
         [
             InlineKeyboardButton("Баланс", callback_data="menu:balance"),
             InlineKeyboardButton("История", callback_data="menu:history"),
         ],
         [
-            InlineKeyboardButton("Подписки", callback_data="menu:subscriptions"),
-            InlineKeyboardButton("Платежи", callback_data="menu:payments"),
-        ],
-        [
-            InlineKeyboardButton("Займы", callback_data="menu:loans"),
             InlineKeyboardButton("Добавить домен", callback_data="menu:domain"),
+            InlineKeyboardButton("Помощь", callback_data="menu:help"),
         ],
-        [InlineKeyboardButton("Помощь", callback_data="menu:help")],
+        [InlineKeyboardButton("Обновить", callback_data="menu:refresh")],
     ]
     return InlineKeyboardMarkup(buttons)
 
@@ -42,9 +48,21 @@ def _build_help_text() -> str:
 
 def _build_menu_text() -> str:
     return (
-        "Привет! Главное меню.\n"
+        "🏠 Главное меню\n"
         "Выбери раздел ниже, я обновлю сообщение без спама."
     )
+
+
+async def _build_menu_summary(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    force_refresh: bool,
+) -> str:
+    if not settings.site_api_base_url or not settings.site_api_key:
+        return _build_menu_text()
+    payload = await fetch_lk_payload(update, context, force_refresh=force_refresh)
+    return build_menu_summary_text(payload)
 
 
 async def show_main_menu(
@@ -52,10 +70,16 @@ async def show_main_menu(
     context: ContextTypes.DEFAULT_TYPE,
     *,
     view: str = "main",
+    force_refresh: bool = False,
 ) -> None:
     text = _build_menu_text()
     if view == "help":
         text = _build_help_text()
+    elif view == "main":
+        try:
+            text = await _build_menu_summary(update, context, force_refresh=force_refresh)
+        except CollectorAPIError:
+            text = _build_menu_text() + "\n\nЛК временно недоступен."
 
     keyboard = _build_main_menu_keyboard()
     await send_or_edit_primary(update, context, text=text, reply_markup=keyboard)
@@ -71,6 +95,10 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if data == "menu:help":
         await show_main_menu(update, context, view="help")
+        return
+
+    if data == "menu:refresh":
+        await show_main_menu(update, context, force_refresh=True)
         return
 
     if data == "menu:domain":

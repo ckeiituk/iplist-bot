@@ -23,6 +23,8 @@ def mock_env(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "key1,key2,key3")
     monkeypatch.setenv("LOG_CHANNEL_ID", "-100123456789:42")
     monkeypatch.setenv("WEBHOOK_SECRET", "test_secret")
+    monkeypatch.setenv("SITE_API_BASE_URL", "")
+    monkeypatch.setenv("SITE_API_KEY", "")
 
 
 # ============================================================================
