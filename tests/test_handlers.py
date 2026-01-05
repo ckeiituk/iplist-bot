@@ -122,3 +122,88 @@ class TestCommonHandlers:
             mock_bot.send_message.assert_called_once()
             call_kwargs = mock_bot.send_message.call_args[1]
             assert call_kwargs["message_thread_id"] == 42
+
+
+class TestMenuHandlers:
+    """Tests for menu handlers."""
+
+    @pytest.mark.asyncio
+    async def test_menu_callback_help(self, mock_update, mock_context):
+        """Help callback should route to help view."""
+        from bot.handlers.menu import handle_menu_callback
+
+        mock_update.callback_query = MagicMock()
+        mock_update.callback_query.data = "menu:help"
+        mock_update.callback_query.answer = AsyncMock()
+
+        with patch("bot.handlers.menu.show_main_menu", new_callable=AsyncMock) as mock_show:
+            await handle_menu_callback(mock_update, mock_context)
+
+            mock_show.assert_awaited_once()
+            call_kwargs = mock_show.call_args.kwargs
+            assert call_kwargs["view"] == "help"
+
+    @pytest.mark.asyncio
+    async def test_menu_callback_domain(self, mock_update, mock_context):
+        """Domain callback should request a domain message."""
+        from bot.handlers.menu import handle_menu_callback
+
+        mock_update.callback_query = MagicMock()
+        mock_update.callback_query.data = "menu:domain"
+        mock_update.callback_query.answer = AsyncMock()
+
+        with patch("bot.handlers.menu.send_or_edit_primary", new_callable=AsyncMock) as mock_send:
+            await handle_menu_callback(mock_update, mock_context)
+
+            mock_send.assert_awaited_once()
+            text = mock_send.call_args.kwargs["text"]
+            assert "Пришли домен" in text
+
+    @pytest.mark.asyncio
+    async def test_menu_callback_section(self, mock_update, mock_context):
+        """Section callback should route to LK handler."""
+        from bot.handlers.menu import handle_menu_callback
+
+        mock_update.callback_query = MagicMock()
+        mock_update.callback_query.data = "menu:balance"
+        mock_update.callback_query.answer = AsyncMock()
+
+        with patch("bot.handlers.lk.lk_start", new_callable=AsyncMock) as mock_lk:
+            await handle_menu_callback(mock_update, mock_context)
+
+            mock_lk.assert_awaited_once()
+            call_kwargs = mock_lk.call_args.kwargs
+            assert call_kwargs["section"] == "balance"
+
+    @pytest.mark.asyncio
+    async def test_send_payment_request_includes_buttons(self, mock_bot):
+        """Test payment request includes admin action buttons."""
+        from bot.handlers.common import send_payment_request
+
+        with patch("bot.handlers.common.settings") as mock_settings:
+            mock_settings.lk_admin_channel = -100123
+            mock_settings.lk_admin_topic = 77
+
+            user = MagicMock()
+            user.username = "testuser"
+            user.full_name = "Test User"
+            user.id = 321
+
+            payment = {
+                "id": 55,
+                "amount": 10,
+                "status": "pending",
+                "due_date": "2024-01-01",
+                "comment": "Test payment",
+            }
+
+            await send_payment_request(mock_bot, user, payment)
+
+            mock_bot.send_message.assert_awaited_once()
+            call_kwargs = mock_bot.send_message.call_args.kwargs
+            assert call_kwargs["message_thread_id"] == 77
+
+            reply_markup = call_kwargs["reply_markup"]
+            buttons = reply_markup.inline_keyboard
+            assert buttons[0][0].callback_data == "admin_payment:confirm:55:321"
+            assert buttons[0][1].callback_data == "admin_payment:decline:55:321"

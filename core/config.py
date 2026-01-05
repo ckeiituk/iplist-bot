@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     # Optional logging - raw value may contain "channel_id:topic_id"
     log_channel_id: str | None = None
     log_topic_id: int | None = None
+
+    # Collector API (LK data)
+    site_api_base_url: str | None = None
+    site_api_key: str | None = None
+
+    # LK admin requests (raw "channel_id:topic_id")
+    lk_admin_channel_id: str | None = None
     
     # Webhook
     webhook_secret: str | None = None
@@ -34,6 +41,8 @@ class Settings(BaseSettings):
     # Parsed values (set by model_validator)
     _parsed_channel_id: int | None = None
     _parsed_topic_id: int | None = None
+    _parsed_lk_admin_channel_id: int | None = None
+    _parsed_lk_admin_topic_id: int | None = None
     
     @property
     def gemini_api_keys(self) -> list[str]:
@@ -50,31 +59,41 @@ class Settings(BaseSettings):
     def topic_id(self) -> int | None:
         """Get parsed topic ID."""
         return self._parsed_topic_id
+
+    @property
+    def lk_admin_channel(self) -> int | None:
+        """Get parsed LK admin channel ID."""
+        return self._parsed_lk_admin_channel_id
+
+    @property
+    def lk_admin_topic(self) -> int | None:
+        """Get parsed LK admin topic ID."""
+        return self._parsed_lk_admin_topic_id
+
+    @staticmethod
+    def _parse_channel_with_topic(raw: str | None) -> tuple[int | None, int | None]:
+        if raw is None or raw == "":
+            return None, None
+
+        if ":" in raw:
+            parts = raw.split(":")
+            try:
+                return int(parts[0]), int(parts[1])
+            except (ValueError, IndexError):
+                return None, None
+
+        try:
+            return int(raw), None
+        except ValueError:
+            return None, None
     
     @model_validator(mode="after")
     def parse_log_channel_and_topic(self):
         """Parse LOG_CHANNEL_ID which may contain 'channel_id:topic_id'."""
-        raw = self.log_channel_id
-        if raw is None or raw == "":
-            self._parsed_channel_id = None
-            self._parsed_topic_id = None
-            return self
-        
-        if ":" in raw:
-            parts = raw.split(":")
-            try:
-                self._parsed_channel_id = int(parts[0])
-                self._parsed_topic_id = int(parts[1])
-            except (ValueError, IndexError):
-                self._parsed_channel_id = None
-                self._parsed_topic_id = None
-        else:
-            try:
-                self._parsed_channel_id = int(raw)
-            except ValueError:
-                self._parsed_channel_id = None
-            self._parsed_topic_id = None
-        
+        self._parsed_channel_id, self._parsed_topic_id = self._parse_channel_with_topic(self.log_channel_id)
+        self._parsed_lk_admin_channel_id, self._parsed_lk_admin_topic_id = self._parse_channel_with_topic(
+            self.lk_admin_channel_id
+        )
         return self
     
     model_config = {

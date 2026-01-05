@@ -36,3 +36,8 @@ class GeminiAPIError(APIError):
 class GitHubAPIError(APIError):
     """GitHub API call failed."""
     pass
+
+
+class CollectorAPIError(APIError):
+    """Collector API call failed."""
+    pass

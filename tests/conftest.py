@@ -41,14 +41,16 @@ def mock_bot():
 def mock_update():
     """Create a mock Telegram Update."""
     update = MagicMock()
+    update.callback_query = None
     update.effective_user.id = 123456
     update.effective_user.username = "testuser"
     update.effective_user.full_name = "Test User"
     update.effective_chat.id = -100987654321
-    update.effective_message.message_thread_id = None
-    update.effective_message.is_topic_message = False
     update.message.text = "example.com"
     update.message.reply_text = AsyncMock()
+    update.effective_message = update.message
+    update.effective_message.message_thread_id = None
+    update.effective_message.is_topic_message = False
     return update
 
 
@@ -58,6 +60,7 @@ def mock_context(mock_bot):
     context = MagicMock()
     context.bot = mock_bot
     context.args = []
+    context.user_data = {}
     return context
 
 

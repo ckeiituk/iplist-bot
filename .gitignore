@@ -33,6 +33,10 @@ venv.bak/
 
 # Environment variables
 .env
+.env.*
+.envrc
+*.token
+token.txt
 
 # MacOS
 .DS_Store

@@ -115,15 +115,16 @@ class TestClassifyDomain:
         
         categories = ["games", "social", "streaming"]
         
-        with patch.object(web_searcher, 'search', return_value="Steam gaming platform"):
-            with patch.object(gemini_client, 'generate', new_callable=AsyncMock) as mock_gen:
-                mock_gen.return_value = "games"
-                
-                result = await classify_domain(
-                    gemini_client, web_searcher, "store.steampowered.com", categories
-                )
-                
-                assert result == "games"
+        with patch.object(web_searcher, 'search', return_value="store steampowered.com"):
+            with patch.object(web_searcher, 'fetch_page', new_callable=AsyncMock, return_value=""):
+                with patch.object(gemini_client, 'generate', new_callable=AsyncMock) as mock_gen:
+                    mock_gen.return_value = "games"
+
+                    result = await classify_domain(
+                        gemini_client, web_searcher, "store.steampowered.com", categories
+                    )
+
+                    assert result == "games"
     
     @pytest.mark.asyncio
     async def test_classify_unknown_category_raises(self, gemini_client, web_searcher):
@@ -133,14 +134,15 @@ class TestClassifyDomain:
         
         categories = ["games", "social"]
         
-        with patch.object(web_searcher, 'search', return_value="Some content"):
-            with patch.object(gemini_client, 'generate', new_callable=AsyncMock) as mock_gen:
-                mock_gen.return_value = "unknown_category"
-                
-                with pytest.raises(CategoryNotFoundError):
-                    await classify_domain(
-                        gemini_client, web_searcher, "example.com", categories
-                    )
+        with patch.object(web_searcher, 'search', return_value="example.com content"):
+            with patch.object(web_searcher, 'fetch_page', new_callable=AsyncMock, return_value=""):
+                with patch.object(gemini_client, 'generate', new_callable=AsyncMock) as mock_gen:
+                    mock_gen.return_value = "unknown_category"
+
+                    with pytest.raises(CategoryNotFoundError):
+                        await classify_domain(
+                            gemini_client, web_searcher, "example.com", categories
+                        )
 
 
 class TestResolveDomainFromKeyword:
