@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import ContextTypes
 
 from bot.core.config import settings
@@ -12,7 +12,14 @@ from bot.handlers.ui import send_or_edit_primary
 
 
 def _build_main_menu_keyboard() -> InlineKeyboardMarkup:
-    buttons = [
+    buttons = []
+
+    if settings.site_webapp_url:
+        buttons.append(
+            [InlineKeyboardButton("Открыть ЛК", web_app=WebAppInfo(url=settings.site_webapp_url))]
+        )
+
+    buttons.extend([
         [
             InlineKeyboardButton("Сводка", callback_data="menu:lk"),
             InlineKeyboardButton("Платежи", callback_data="menu:payments"),
@@ -30,7 +37,7 @@ def _build_main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("Помощь", callback_data="menu:help"),
         ],
         [InlineKeyboardButton("Обновить", callback_data="menu:refresh")],
-    ]
+    ])
     return InlineKeyboardMarkup(buttons)
 
 

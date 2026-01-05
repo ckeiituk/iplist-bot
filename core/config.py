@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     site_api_base_url: str | None = None
     site_api_key: str | None = None
 
+    # Public WebApp URL for Telegram Mini App entry
+    site_webapp_url: str | None = None
+
     # LK admin requests (raw "channel_id:topic_id")
     lk_admin_channel_id: str | None = None
     
@@ -69,6 +72,14 @@ class Settings(BaseSettings):
     def lk_admin_topic(self) -> int | None:
         """Get parsed LK admin topic ID."""
         return self._parsed_lk_admin_topic_id
+
+    @field_validator("site_webapp_url", mode="before")
+    @classmethod
+    def _normalize_webapp_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
 
     @staticmethod
     def _parse_channel_with_topic(raw: str | None) -> tuple[int | None, int | None]:

@@ -31,6 +31,7 @@
 - bot/.env
   - SITE_API_BASE_URL
   - SITE_API_KEY
+  - SITE_WEBAPP_URL (optional, for Telegram Mini App)
   - LK_ADMIN_CHANNEL_ID (example: -1003434221917:42)
 - site/.env
   - API_KEY

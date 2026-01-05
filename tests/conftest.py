@@ -25,6 +25,7 @@ def mock_env(monkeypatch):
     monkeypatch.setenv("WEBHOOK_SECRET", "test_secret")
     monkeypatch.setenv("SITE_API_BASE_URL", "")
     monkeypatch.setenv("SITE_API_KEY", "")
+    monkeypatch.setenv("SITE_WEBAPP_URL", "")
 
 
 # ============================================================================
