@@ -15,7 +15,7 @@ from bot.models.pending import PendingBuild
 from bot.services.ai.classifier import classify_domain
 from bot.services.ai.client import GeminiClient
 from bot.services.ai.resolver import resolve_domain_from_keyword
-from bot.services.dns import resolve_dns
+from bot.services.dns import resolve_dns_with_reason
 from bot.services.github.client import GitHubClient
 from bot.services.github.schemas import SiteConfig
 from bot.services.search import WebSearcher
@@ -75,6 +75,18 @@ def _infer_menu_view(text: str) -> str | None:
     return None
 
 
+def _format_dns_notice(domain: str, issue: str | None) -> str:
+    if issue == "nxdomain":
+        return f"⚠️ DNS: домен не найден (NXDOMAIN): {domain}. Продолжаю без IP."
+    if issue == "no_answer":
+        return f"⚠️ DNS: нет A/AAAA записей для {domain}. Продолжаю без IP."
+    if issue == "no_nameservers":
+        return f"⚠️ DNS: серверы не отвечают для {domain}. Продолжаю без IP."
+    if issue == "timeout":
+        return f"⚠️ DNS: таймаут запроса для {domain}. Продолжаю без IP."
+    return f"⚠️ DNS: не удалось получить IP для {domain}. Продолжаю без IP."
+
+
 def _get_message_thread_id(update: Update) -> int | None:
     """Get message thread ID if in a topic."""
     msg = update.effective_message
@@ -114,11 +126,11 @@ async def add_domain_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         # Step 2: Resolve DNS
         await status_msg.edit_text(f"🔍 Резолвлю DNS для {domain}...")
-        ip4, ip6 = resolve_dns(domain)
-
+        dns_result = resolve_dns_with_reason(domain)
+        ip4, ip6 = dns_result.ip4, dns_result.ip6
+        dns_notice = ""
         if not ip4 and not ip6:
-            await status_msg.edit_text(f"❌ Не удалось получить IP для {domain}.")
-            return
+            dns_notice = _format_dns_notice(domain, dns_result.issue)
 
         # Step 3: Create GitHub file
         site_config = SiteConfig.create(domain, settings.dns_servers, ip4, ip6)
@@ -146,13 +158,17 @@ async def add_domain_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             ip_info.append(f"IPv4: {', '.join(ip4)}")
         if ip6:
             ip_info.append(f"IPv6: {', '.join(ip6)}")
+        ip_lines = chr(10).join(ip_info) if ip_info else "IP не найден"
 
-        await status_msg.edit_text(
-            f"✅ Готово! Файл создан.\n"
-            f"Ожидаю сборку... ⏳\n\n"
-            f"📁 Категория: {real_category}\n"
-            f"🌐 {chr(10).join(ip_info)}"
+        message_text = (
+            "✅ Готово! Файл создан.\n"
+            "Ожидаю сборку... ⏳\n\n"
         )
+        if dns_notice:
+            message_text += f"{dns_notice}\n"
+        message_text += f"📁 Категория: {real_category}\n🌐 {ip_lines}"
+
+        await status_msg.edit_text(message_text)
 
         await send_log_report(
             context.bot, update.effective_user, domain, real_category, ip4, ip6, html_url
@@ -266,11 +282,11 @@ async def _process_domain(
 
         # Step 3: DNS resolution
         await status_msg.edit_text("🔍 Резолвлю DNS...")
-        ip4, ip6 = resolve_dns(domain)
-
+        dns_result = resolve_dns_with_reason(domain)
+        ip4, ip6 = dns_result.ip4, dns_result.ip6
+        dns_notice = ""
         if not ip4 and not ip6:
-            await status_msg.edit_text(f"❌ Не удалось получить IP для {domain}.")
-            return
+            dns_notice = _format_dns_notice(domain, dns_result.issue)
 
         # Step 4: Create GitHub file
         site_config = SiteConfig.create(domain, settings.dns_servers, ip4, ip6)
@@ -296,13 +312,14 @@ async def _process_domain(
             ip_info.append(f"IPv4: {', '.join(ip4)}")
         if ip6:
             ip_info.append(f"IPv6: {', '.join(ip6)}")
+        ip_lines = chr(10).join(ip_info) if ip_info else "IP не найден"
 
-        await status_msg.edit_text(
-            f"✅ Готово!\n"
-            f"Ожидаю сборку... ⏳\n\n"
-            f"📁 Категория: {category}\n"
-            f"🌐 {chr(10).join(ip_info)}"
-        )
+        message_text = "✅ Готово!\nОжидаю сборку... ⏳\n\n"
+        if dns_notice:
+            message_text += f"{dns_notice}\n"
+        message_text += f"📁 Категория: {category}\n🌐 {ip_lines}"
+
+        await status_msg.edit_text(message_text)
 
         await send_log_report(
             context.bot, update.effective_user, domain, category, ip4, ip6, html_url
