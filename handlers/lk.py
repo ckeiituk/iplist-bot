@@ -163,18 +163,20 @@ def _build_subscriptions_text(payload: dict[str, Any]) -> str:
 
 def _build_loans_text(payload: dict[str, Any]) -> str:
     loans = payload.get("loans") or []
-    if not loans:
+    # Filter out closed loans
+    active_loans = [loan for loan in loans if not loan.get("is_paused")]
+    
+    if not active_loans:
         return "Займов нет."
 
     lines = ["💸 Займы"]
-    for item in loans[:_MAX_ITEMS]:
+    for item in active_loans[:_MAX_ITEMS]:
         name = item.get("name") or "—"
         amount = _format_amount(item.get("amount"))
         due = _format_date(item.get("next_due_date"))
-        paused = " (закрыт)" if item.get("is_paused") else ""
-        lines.append(f"• {name} — {amount} • {due}{paused}")
-    if len(loans) > _MAX_ITEMS:
-        lines.append(f"…и еще {len(loans) - _MAX_ITEMS}")
+        lines.append(f"• {name} — {amount} • {due}")
+    if len(active_loans) > _MAX_ITEMS:
+        lines.append(f"…и еще {len(active_loans) - _MAX_ITEMS}")
     return "\n".join(lines)
 
 
