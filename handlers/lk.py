@@ -202,10 +202,10 @@ def _build_payments_text(payload: dict[str, Any]) -> str:
             payment_id = item.get('id')
             amount = _format_amount(item.get("amount"))
             due = _format_date(item.get("due_date"))
-            comment = _truncate(item.get("comment") or "Платеж", 50)
+            comment = _truncate(item.get("comment") or "Платеж", 35)
             
-            lines.append(f"#{payment_id} • {amount}")
-            lines.append(f"  📅 {due} • {comment}")
+            lines.append(f"#{payment_id} — {amount}")
+            lines.append(f"{due} • {comment}")
             
         if len(pending) > _MAX_ITEMS:
             lines.append(f"…и еще {len(pending) - _MAX_ITEMS}")
@@ -219,10 +219,10 @@ def _build_payments_text(payload: dict[str, Any]) -> str:
             payment_id = item.get('id')
             amount = _format_amount(item.get("amount"))
             paid_at = _format_date(item.get("paid_at") or item.get("created_at"))
-            comment = _truncate(item.get("comment") or "Платеж", 50)
+            comment = _truncate(item.get("comment") or "Платеж", 35)
             
-            lines.append(f"#{payment_id} • {amount}")
-            lines.append(f"  📅 {paid_at} • {comment}")
+            lines.append(f"#{payment_id} — {amount}")
+            lines.append(f"{paid_at} • {comment}")
             
         if len(recent) > _MAX_ITEMS:
             lines.append(f"…и еще {len(recent) - _MAX_ITEMS}")
