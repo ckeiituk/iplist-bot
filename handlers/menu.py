@@ -16,40 +16,33 @@ def _build_main_menu_keyboard() -> InlineKeyboardMarkup:
 
     if settings.site_webapp_url:
         buttons.append(
-            [InlineKeyboardButton("Открыть ЛК", web_app=WebAppInfo(url=settings.site_webapp_url))]
+            [InlineKeyboardButton("📱 Открыть ЛК", web_app=WebAppInfo(url=settings.site_webapp_url))]
         )
 
     buttons.extend([
         [
-            InlineKeyboardButton("Сводка", callback_data="menu:lk"),
-            InlineKeyboardButton("Платежи", callback_data="menu:payments"),
+            InlineKeyboardButton("🧾 Платежи", callback_data="menu:payments"),
+            InlineKeyboardButton("🔁 Подписки", callback_data="menu:subscriptions"),
         ],
         [
-            InlineKeyboardButton("Подписки", callback_data="menu:subscriptions"),
-            InlineKeyboardButton("Займы", callback_data="menu:loans"),
+            InlineKeyboardButton("💸 Займы", callback_data="menu:loans"),
+            InlineKeyboardButton("📊 История", callback_data="menu:history"),
         ],
-        [
-            InlineKeyboardButton("Баланс", callback_data="menu:balance"),
-            InlineKeyboardButton("История", callback_data="menu:history"),
-        ],
-        [
-            InlineKeyboardButton("Добавить домен", callback_data="menu:domain"),
-            InlineKeyboardButton("Помощь", callback_data="menu:help"),
-        ],
-        [InlineKeyboardButton("Обновить", callback_data="menu:refresh")],
+        [InlineKeyboardButton("ℹ️ Помощь", callback_data="menu:help")],
     ])
     return InlineKeyboardMarkup(buttons)
 
 
 def _build_help_text() -> str:
     return (
+        "💡 Что я умею:\n\n"
+        "• Просто пришли домен — я сам добавлю его\n"
+        "• Напиши \"платежи\", \"баланс\", \"подписки\" — покажу детали\n"
+        "• Используй кнопки ниже для быстрого доступа\n\n"
         "Команды:\n"
-        "/lk - Личный кабинет\n"
-        "/me - Личный кабинет\n"
-        "/start - Главное меню\n"
-        "/menu - Главное меню\n"
-        "/add <домен> <категория> - Ручное добавление домена\n\n"
-        "Можно просто отправить домен — я уточню действие."
+        "/start или /menu - Главное меню\n"
+        "/lk или /me - Личный кабинет\n"
+        "/add <домен> <категория> - Ручное добавление с категорией"
     )
 
 
@@ -102,19 +95,6 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if data == "menu:help":
         await show_main_menu(update, context, view="help")
-        return
-
-    if data == "menu:refresh":
-        await show_main_menu(update, context, force_refresh=True)
-        return
-
-    if data == "menu:domain":
-        await send_or_edit_primary(
-            update,
-            context,
-            text="Пришли домен сообщением, я уточню действие.",
-            reply_markup=_build_main_menu_keyboard(),
-        )
         return
 
     if data.startswith("menu:"):

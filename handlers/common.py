@@ -36,18 +36,25 @@ async def send_log_report(
     try:
         user_mention = f"@{user.username}" if user.username else user.full_name
         
+        # Escape HTML special characters
+        def escape_html(text: str) -> str:
+            return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        
+        domain_escaped = escape_html(domain)
+        category_escaped = escape_html(category)
+        
         msg = (
-            f"🆕 **Новый домен добавлен**\n"
-            f"👤 От: {user_mention} (`{user.id}`)\n"
-            f"🌐 Домен: `{domain}`\n"
-            f"📁 Категория: `{category}`\n"
-            f"📄 [JSON файл]({html_url})"
+            "🆕 <b>Новый домен добавлен</b>\n"
+            f"👤 От: {user_mention} (<code>{user.id}</code>)\n"
+            f"🌐 Домен: <code>{domain_escaped}</code>\n"
+            f"📁 Категория: <code>{category_escaped}</code>\n"
+            f"📄 <a href=\"{html_url}\">JSON файл</a>"
         )
         
         kwargs = {
             "chat_id": settings.channel_id,
             "text": msg,
-            "parse_mode": "Markdown",
+            "parse_mode": "HTML",
         }
         if settings.topic_id:
             kwargs["message_thread_id"] = settings.topic_id
@@ -108,3 +115,41 @@ async def send_payment_request(
         await bot.send_message(**kwargs)
     except Exception as e:
         logger.error(f"Payment request error: {e}")
+
+
+async def send_debug_log(
+    bot: Bot,
+    user: User,
+    message_text: str,
+    *,
+    message_type: str = "text",
+) -> None:
+    """Send debug log to debug channel/topic."""
+    if not settings.debug_channel:
+        return
+
+    user_mention = f"@{user.username}" if user.username else user.full_name
+    user_id = user.id
+
+    # Truncate long messages
+    truncated_text = message_text[:200]
+    if len(message_text) > 200:
+        truncated_text += "..."
+
+    msg = (
+        f"🔍 {message_type.upper()}\n"
+        f"👤 {user_mention} (`{user_id}`)\n"
+        f"💬 {truncated_text}"
+    )
+
+    kwargs = {
+        "chat_id": settings.debug_channel,
+        "text": msg,
+    }
+    if settings.debug_topic:
+        kwargs["message_thread_id"] = settings.debug_topic
+
+    try:
+        await bot.send_message(**kwargs)
+    except Exception as e:
+        logger.error(f"Debug log error: {e}")

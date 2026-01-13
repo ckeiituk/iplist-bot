@@ -31,6 +31,9 @@ class Settings(BaseSettings):
 
     # LK admin requests (raw "channel_id:topic_id")
     lk_admin_channel_id: str | None = None
+
+    # Debug logging (raw "channel_id:topic_id")
+    debug_channel_id: str | None = None
     
     # Webhook
     webhook_secret: str | None = None
@@ -46,6 +49,8 @@ class Settings(BaseSettings):
     _parsed_topic_id: int | None = None
     _parsed_lk_admin_channel_id: int | None = None
     _parsed_lk_admin_topic_id: int | None = None
+    _parsed_debug_channel_id: int | None = None
+    _parsed_debug_topic_id: int | None = None
     
     @property
     def gemini_api_keys(self) -> list[str]:
@@ -72,6 +77,16 @@ class Settings(BaseSettings):
     def lk_admin_topic(self) -> int | None:
         """Get parsed LK admin topic ID."""
         return self._parsed_lk_admin_topic_id
+
+    @property
+    def debug_channel(self) -> int | None:
+        """Get parsed debug channel ID."""
+        return self._parsed_debug_channel_id
+
+    @property
+    def debug_topic(self) -> int | None:
+        """Get parsed debug topic ID."""
+        return self._parsed_debug_topic_id
 
     @field_validator("site_webapp_url", mode="before")
     @classmethod
@@ -104,6 +119,9 @@ class Settings(BaseSettings):
         self._parsed_channel_id, self._parsed_topic_id = self._parse_channel_with_topic(self.log_channel_id)
         self._parsed_lk_admin_channel_id, self._parsed_lk_admin_topic_id = self._parse_channel_with_topic(
             self.lk_admin_channel_id
+        )
+        self._parsed_debug_channel_id, self._parsed_debug_topic_id = self._parse_channel_with_topic(
+            self.debug_channel_id
         )
         return self
     

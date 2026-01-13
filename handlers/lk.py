@@ -229,21 +229,14 @@ def _build_nav_keyboard(
     history_payload: dict[str, Any] | None = None,
 ) -> InlineKeyboardMarkup:
     buttons = [
+        [InlineKeyboardButton("🏠 Главная", callback_data="menu:main")],
         [
-            InlineKeyboardButton("Главное меню", callback_data="menu:main"),
-            InlineKeyboardButton("Обновить", callback_data="lk:refresh"),
+            InlineKeyboardButton("🧾 Платежи", callback_data="lk:payments"),
+            InlineKeyboardButton("📊 История", callback_data="lk:history:1"),
         ],
         [
-            InlineKeyboardButton("Сводка", callback_data="lk:summary"),
-            InlineKeyboardButton("Платежи", callback_data="lk:payments"),
-        ],
-        [
-            InlineKeyboardButton("Баланс", callback_data="lk:balance"),
-            InlineKeyboardButton("История", callback_data="lk:history:1"),
-        ],
-        [
-            InlineKeyboardButton("Подписки", callback_data="lk:subscriptions"),
-            InlineKeyboardButton("Займы", callback_data="lk:loans"),
+            InlineKeyboardButton("🔁 Подписки", callback_data="lk:subscriptions"),
+            InlineKeyboardButton("💸 Займы", callback_data="lk:loans"),
         ],
     ]
 
@@ -424,12 +417,6 @@ async def handle_lk_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     data = query.data or ""
     await query.answer()
-
-    if data == "lk:refresh":
-        section = context.user_data.get("lk_section", "summary")
-        page = context.user_data.get("lk_history_page", 1)
-        await lk_start(update, context, section=section, page=page, force_refresh=True)
-        return
 
     if data.startswith("lk:paid:"):
         await _handle_payment_request(update, context, data)

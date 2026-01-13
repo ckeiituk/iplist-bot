@@ -102,6 +102,10 @@ async def add_domain_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("Использование: /add <домен> <категория>")
         return
 
+    # Debug logging
+    from bot.handlers.common import send_debug_log
+    await send_debug_log(context.bot, update.effective_user, f"/add {' '.join(args)}", message_type="command")
+
     domain = _clean_domain(args[0])
     category_input = args[1].lower()
 
@@ -185,6 +189,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not text:
         return
 
+    # Debug logging
+    from bot.handlers.common import send_debug_log
+    await send_debug_log(context.bot, update.effective_user, text, message_type="message")
+
     domain = _extract_domain(text)
     if domain:
         await _ask_domain_action(update, context, domain)
@@ -219,13 +227,6 @@ async def handle_domain_callback(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data.pop("pending_domain", None)
         return
 
-    if data == "domain:lk":
-        from bot.handlers.lk import lk_start
-
-        context.user_data.pop("pending_domain", None)
-        await lk_start(update, context, section="summary")
-        return
-
     if data == "domain:add":
         domain = context.user_data.pop("pending_domain", None)
         if not domain:
@@ -238,13 +239,12 @@ async def _ask_domain_action(update: Update, context: ContextTypes.DEFAULT_TYPE,
     context.user_data["pending_domain"] = domain
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Добавить домен", callback_data="domain:add"),
-            InlineKeyboardButton("Открыть ЛК", callback_data="domain:lk"),
+            InlineKeyboardButton("✅ Добавить", callback_data="domain:add"),
+            InlineKeyboardButton("❌ Отмена", callback_data="domain:cancel"),
         ],
-        [InlineKeyboardButton("Отмена", callback_data="domain:cancel")],
     ])
     await update.message.reply_text(
-        f"Вижу домен: {domain}. Что сделать?",
+        f"Вижу домен: {domain}",
         reply_markup=keyboard,
     )
 
