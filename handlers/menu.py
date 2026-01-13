@@ -80,7 +80,15 @@ async def show_main_menu(
         except CollectorAPIError:
             text = _build_menu_text() + "\n\nЛК временно недоступен."
 
-    keyboard = _build_main_menu_keyboard()
+    if view == "help":
+        text = _build_help_text()
+        # Show simplified keyboard with back button on help screen
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏠 Главная", callback_data="menu:main")]
+        ])
+    else:
+        keyboard = _build_main_menu_keyboard()
+        
     await send_or_edit_primary(update, context, text=text, reply_markup=keyboard)
 
 

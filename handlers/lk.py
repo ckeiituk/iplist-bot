@@ -199,11 +199,14 @@ def _build_payments_text(payload: dict[str, Any]) -> str:
     if pending:
         lines.append("⏳ Ожидают оплаты")
         for item in pending[:_MAX_ITEMS]:
-            comment = _truncate(item.get("comment") or "Платеж")
+            payment_id = item.get('id')
             amount = _format_amount(item.get("amount"))
-            status = _status_label(item.get("status"))
             due = _format_date(item.get("due_date"))
-            lines.append(f"• #{item.get('id')} — {amount} · {due} · {status} · {comment}")
+            comment = _truncate(item.get("comment") or "Платеж", 50)
+            
+            lines.append(f"#{payment_id} • {amount}")
+            lines.append(f"  📅 {due} • {comment}")
+            
         if len(pending) > _MAX_ITEMS:
             lines.append(f"…и еще {len(pending) - _MAX_ITEMS}")
     else:
@@ -213,11 +216,14 @@ def _build_payments_text(payload: dict[str, Any]) -> str:
         lines.append("")
         lines.append("✅ Последние платежи")
         for item in recent[:_MAX_ITEMS]:
-            comment = _truncate(item.get("comment") or "Платеж")
+            payment_id = item.get('id')
             amount = _format_amount(item.get("amount"))
-            status = _status_label(item.get("status"))
             paid_at = _format_date(item.get("paid_at") or item.get("created_at"))
-            lines.append(f"• #{item.get('id')} — {amount} · {paid_at} · {status} · {comment}")
+            comment = _truncate(item.get("comment") or "Платеж", 50)
+            
+            lines.append(f"#{payment_id} • {amount}")
+            lines.append(f"  📅 {paid_at} • {comment}")
+            
         if len(recent) > _MAX_ITEMS:
             lines.append(f"…и еще {len(recent) - _MAX_ITEMS}")
 
