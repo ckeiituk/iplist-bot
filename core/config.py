@@ -34,6 +34,9 @@ class Settings(BaseSettings):
 
     # Debug logging (raw "channel_id:topic_id")
     debug_channel_id: str | None = None
+
+    # Admin user IDs (comma/space separated)
+    admin_user_ids: str | None = None
     
     # Webhook
     webhook_secret: str | None = None
@@ -87,6 +90,24 @@ class Settings(BaseSettings):
     def debug_topic(self) -> int | None:
         """Get parsed debug topic ID."""
         return self._parsed_debug_topic_id
+
+    @staticmethod
+    def _parse_int_list(raw: str | None) -> list[int]:
+        if raw is None:
+            return []
+        tokens = str(raw).replace(",", " ").split()
+        result: list[int] = []
+        for token in tokens:
+            try:
+                result.append(int(token))
+            except ValueError:
+                continue
+        return result
+
+    @property
+    def admin_ids(self) -> set[int]:
+        """Get parsed admin user IDs."""
+        return set(self._parse_int_list(self.admin_user_ids))
 
     @field_validator("site_webapp_url", mode="before")
     @classmethod

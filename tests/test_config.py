@@ -56,6 +56,15 @@ class TestSettings:
 
         assert settings.lk_admin_channel == -100777777777
         assert settings.lk_admin_topic == 99
+
+    def test_admin_user_ids_parsed(self, monkeypatch):
+        """Test ADMIN_USER_IDS parsing."""
+        monkeypatch.setenv("ADMIN_USER_IDS", "123, 456 789")
+
+        from bot.core.config import Settings
+        settings = Settings()
+
+        assert settings.admin_ids == {123, 456, 789}
     
     def test_default_values(self):
         """Test that default values are set correctly."""
