@@ -120,6 +120,9 @@ async def _send_reminder_after_delay(
     chat_id: int,
     message: str,
     delay_seconds: float,
+    scheduled_for: datetime,
+    requested_by: str | None,
+    target_label: str | None,
 ) -> None:
     try:
         await asyncio.sleep(delay_seconds)
@@ -129,6 +132,52 @@ async def _send_reminder_after_delay(
         raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to send reminder to %s: %s", chat_id, exc)
+        await _send_reminder_failure_log(
+            context,
+            chat_id=chat_id,
+            target_label=target_label,
+            scheduled_for=scheduled_for,
+            requested_by=requested_by,
+            message=message,
+            error=exc,
+        )
+
+
+async def _send_reminder_failure_log(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    chat_id: int,
+    target_label: str | None,
+    scheduled_for: datetime,
+    requested_by: str | None,
+    message: str,
+    error: Exception,
+) -> None:
+    if not settings.channel_id:
+        return
+
+    recipient = target_label or str(chat_id)
+    requester = requested_by or "—"
+    text = (
+        "⚠️ Напоминание не доставлено\n"
+        f"Получатель: {recipient}\n"
+        f"Когда: {_format_datetime(scheduled_for)}\n"
+        f"Кто поставил: {requester}\n"
+        f"Ошибка: {error}\n"
+        f"Текст: {message}"
+    )
+
+    kwargs = {
+        "chat_id": settings.channel_id,
+        "text": text,
+    }
+    if settings.topic_id:
+        kwargs["message_thread_id"] = settings.topic_id
+
+    try:
+        await context.bot.send_message(**kwargs)
+    except Exception as log_exc:  # noqa: BLE001
+        logger.warning("Failed to send reminder failure log: %s", log_exc)
 
 
 def _schedule_reminder_task(coro: Coroutine[None, None, None]) -> None:
@@ -151,6 +200,14 @@ def _get_reply_target(update: Update):
     if update.message:
         return update.message.reply_text
     return None
+
+
+def _format_user_identity(update: Update) -> str | None:
+    user = update.effective_user
+    if not user:
+        return None
+    username = f"@{user.username}" if user.username else user.full_name
+    return f"{username} ({user.id})"
 
 
 def _clear_reminder_state(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -273,6 +330,9 @@ async def _handle_direct_reminder(
             chat_id=target_chat_id,
             message=message,
             delay_seconds=delay_seconds,
+            scheduled_for=scheduled_for,
+            requested_by=_format_user_identity(update),
+            target_label=target_label,
         )
     )
 
@@ -367,6 +427,9 @@ async def handle_reminder_message(update: Update, context: ContextTypes.DEFAULT_
             chat_id=target_chat_id,
             message=text,
             delay_seconds=delay_seconds,
+            scheduled_for=scheduled_for,
+            requested_by=_format_user_identity(update),
+            target_label=target_label,
         )
     )
 
