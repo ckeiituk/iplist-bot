@@ -37,6 +37,9 @@ class Settings(BaseSettings):
 
     # Admin user IDs (comma/space separated)
     admin_user_ids: str | None = None
+
+    # Reminder timezone (IANA name, e.g. Europe/Moscow)
+    reminder_timezone: str = "Europe/Moscow"
     
     # Webhook
     webhook_secret: str | None = None

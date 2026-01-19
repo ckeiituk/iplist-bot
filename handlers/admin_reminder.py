@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone, tzinfo
 from typing import Coroutine
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from telegram import Update
 from telegram.ext import (
@@ -27,11 +28,11 @@ _USAGE_TEXT = (
     "Использование:\n"
     "/remind <user_id|@username> <YYYY-MM-DD HH:MM> <сообщение>\n"
     "Пример: /remind 123456789 2024-06-30 09:00 Напомнить про оплату\n"
-    "Время — по часовому поясу сервера."
+    "Время — по Москве (MSK)."
 )
 
 _PROMPT_TARGET = "Кому напомнить? Укажи user_id или @username."
-_PROMPT_WHEN = "Когда? Формат: YYYY-MM-DD HH:MM или HH:MM (сегодня/завтра)."
+_PROMPT_WHEN = "Когда? Формат: YYYY-MM-DD HH:MM или HH:MM (сегодня/завтра, MSK)."
 _PROMPT_MESSAGE = "Что написать пользователю?"
 
 _TIME_ONLY_RE = re.compile(r"^\d{1,2}:\d{2}$")
@@ -40,6 +41,23 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _REMINDER_TARGET_ID_KEY = "reminder_target_id"
 _REMINDER_TARGET_LABEL_KEY = "reminder_target_label"
 _REMINDER_WHEN_KEY = "reminder_when"
+
+
+def _get_reminder_timezone() -> tzinfo:
+    tz_name = settings.reminder_timezone or "Europe/Moscow"
+    try:
+        return ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        logger.warning("Timezone %s not found, falling back to MSK offset.", tz_name)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to load timezone %s: %s", tz_name, exc)
+    return timezone(timedelta(hours=3), name="MSK")
+
+
+def _as_timezone(value: datetime, tz: tzinfo) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=tz)
+    return value.astimezone(tz)
 
 
 def _parse_datetime_tokens(tokens: list[str], now: datetime) -> tuple[datetime, int]:
@@ -52,11 +70,11 @@ def _parse_datetime_tokens(tokens: list[str], now: datetime) -> tuple[datetime, 
         return scheduled, 1
 
     if "T" in first:
-        return datetime.fromisoformat(first), 1
+        return _as_timezone(datetime.fromisoformat(first), now.tzinfo or _get_reminder_timezone()), 1
 
     if _DATE_RE.match(first) and len(tokens) >= 2:
         candidate = f"{tokens[0]} {tokens[1]}"
-        return datetime.fromisoformat(candidate), 2
+        return _as_timezone(datetime.fromisoformat(candidate), now.tzinfo or _get_reminder_timezone()), 2
 
     if len(tokens) < 2:
         raise ValueError("missing time")
@@ -65,18 +83,19 @@ def _parse_datetime_tokens(tokens: list[str], now: datetime) -> tuple[datetime, 
         raise ValueError("missing time")
 
     candidate = f"{tokens[0]} {tokens[1]}"
-    return datetime.fromisoformat(candidate), 2
+    return _as_timezone(datetime.fromisoformat(candidate), now.tzinfo or _get_reminder_timezone()), 2
 
 
 def _format_datetime(value: datetime) -> str:
-    if value.tzinfo is None:
-        return value.strftime("%Y-%m-%d %H:%M")
-    return value.isoformat(timespec="minutes")
+    tz = _get_reminder_timezone()
+    localized = _as_timezone(value, tz)
+    tz_name = localized.tzname() or "MSK"
+    return f"{localized.strftime('%Y-%m-%d %H:%M')} {tz_name}"
 
 
 def _apply_time_only(value: str, now: datetime) -> datetime:
     parsed = time.fromisoformat(value)
-    scheduled = datetime.combine(now.date(), parsed)
+    scheduled = datetime.combine(now.date(), parsed, tzinfo=now.tzinfo)
     if scheduled <= now:
         scheduled += timedelta(days=1)
     return scheduled
@@ -84,18 +103,19 @@ def _apply_time_only(value: str, now: datetime) -> datetime:
 
 def _parse_when_text(text: str) -> datetime:
     cleaned = text.strip()
-    now = datetime.now()
+    tz = _get_reminder_timezone()
+    now = datetime.now(tz)
 
     if _TIME_ONLY_RE.match(cleaned):
         return _apply_time_only(cleaned, now)
 
     if "T" in cleaned:
-        return datetime.fromisoformat(cleaned)
+        return _as_timezone(datetime.fromisoformat(cleaned), tz)
 
     if _DATE_RE.match(cleaned):
         raise ValueError("date without time")
 
-    return datetime.fromisoformat(cleaned)
+    return _as_timezone(datetime.fromisoformat(cleaned), tz)
 
 
 async def _resolve_target_chat_id(
@@ -297,7 +317,7 @@ async def _handle_direct_reminder(
         return ConversationHandler.END
 
     user_token = args[0]
-    parse_now = datetime.now()
+    parse_now = datetime.now(_get_reminder_timezone())
 
     try:
         scheduled_for, consumed = _parse_datetime_tokens(args[1:], parse_now)
