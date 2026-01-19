@@ -57,3 +57,24 @@ async def test_admin_reminder_schedules_task(mock_context, monkeypatch):
     mock_schedule.assert_called_once()
     reply_text = update.effective_message.reply_text.call_args.args[0]
     assert "Напоминание" in reply_text
+
+
+@pytest.mark.asyncio
+async def test_admin_reminder_starts_dialog(mock_context, monkeypatch):
+    """Admin without args should be prompted for target."""
+    from bot.handlers.admin_reminder import handle_admin_reminder, settings, REMIND_TARGET
+
+    update = MagicMock()
+    update.effective_user.id = 777
+    update.effective_message = MagicMock()
+    update.effective_message.reply_text = AsyncMock()
+
+    mock_context.args = []
+
+    monkeypatch.setattr(settings, "admin_user_ids", "777")
+
+    state = await handle_admin_reminder(update, mock_context)
+
+    reply_text = update.effective_message.reply_text.call_args.args[0]
+    assert "Кому" in reply_text
+    assert state == REMIND_TARGET

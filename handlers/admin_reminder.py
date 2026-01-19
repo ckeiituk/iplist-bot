@@ -3,16 +3,25 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+import re
+from datetime import datetime, time, timedelta
 from typing import Coroutine
 
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import (
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
+)
 
 from bot.core.config import settings
 from bot.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+REMIND_TARGET, REMIND_WHEN, REMIND_MESSAGE = range(3)
 
 _USAGE_TEXT = (
     "Использование:\n"
@@ -21,17 +30,33 @@ _USAGE_TEXT = (
     "Время — по часовому поясу сервера."
 )
 
+_PROMPT_TARGET = "Кому напомнить? Укажи user_id или @username."
+_PROMPT_WHEN = "Когда? Формат: YYYY-MM-DD HH:MM или HH:MM (сегодня/завтра)."
+_PROMPT_MESSAGE = "Что написать пользователю?"
 
-def _parse_datetime_tokens(tokens: list[str]) -> tuple[datetime, int]:
+_TIME_ONLY_RE = re.compile(r"^\d{1,2}:\d{2}$")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+_REMINDER_TARGET_ID_KEY = "reminder_target_id"
+_REMINDER_TARGET_LABEL_KEY = "reminder_target_label"
+_REMINDER_WHEN_KEY = "reminder_when"
+
+
+def _parse_datetime_tokens(tokens: list[str], now: datetime) -> tuple[datetime, int]:
     if not tokens:
         raise ValueError("empty")
 
     first = tokens[0]
-    if ":" in first or "T" in first:
-        try:
-            return datetime.fromisoformat(first), 1
-        except ValueError:
-            pass
+    if _TIME_ONLY_RE.match(first):
+        scheduled = _apply_time_only(first, now)
+        return scheduled, 1
+
+    if "T" in first:
+        return datetime.fromisoformat(first), 1
+
+    if _DATE_RE.match(first) and len(tokens) >= 2:
+        candidate = f"{tokens[0]} {tokens[1]}"
+        return datetime.fromisoformat(candidate), 2
 
     if len(tokens) < 2:
         raise ValueError("missing time")
@@ -47,6 +72,30 @@ def _format_datetime(value: datetime) -> str:
     if value.tzinfo is None:
         return value.strftime("%Y-%m-%d %H:%M")
     return value.isoformat(timespec="minutes")
+
+
+def _apply_time_only(value: str, now: datetime) -> datetime:
+    parsed = time.fromisoformat(value)
+    scheduled = datetime.combine(now.date(), parsed)
+    if scheduled <= now:
+        scheduled += timedelta(days=1)
+    return scheduled
+
+
+def _parse_when_text(text: str) -> datetime:
+    cleaned = text.strip()
+    now = datetime.now()
+
+    if _TIME_ONLY_RE.match(cleaned):
+        return _apply_time_only(cleaned, now)
+
+    if "T" in cleaned:
+        return datetime.fromisoformat(cleaned)
+
+    if _DATE_RE.match(cleaned):
+        raise ValueError("date without time")
+
+    return datetime.fromisoformat(cleaned)
 
 
 async def _resolve_target_chat_id(
@@ -104,51 +153,118 @@ def _get_reply_target(update: Update):
     return None
 
 
-async def handle_admin_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /remind admin command."""
+def _clear_reminder_state(context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.pop(_REMINDER_TARGET_ID_KEY, None)
+    context.user_data.pop(_REMINDER_TARGET_LABEL_KEY, None)
+    context.user_data.pop(_REMINDER_WHEN_KEY, None)
+
+
+def _get_replied_user_id(update: Update) -> int | None:
+    if not update.effective_message:
+        return None
+    reply_to = update.effective_message.reply_to_message
+    if not reply_to or not reply_to.from_user:
+        return None
+    if reply_to.from_user.is_bot:
+        return None
+    return reply_to.from_user.id
+
+
+def _get_replied_user_label(update: Update) -> str | None:
+    if not update.effective_message:
+        return None
+    reply_to = update.effective_message.reply_to_message
+    if not reply_to or not reply_to.from_user:
+        return None
+    user = reply_to.from_user
+    if user.is_bot:
+        return None
+    username = f"@{user.username}" if user.username else user.full_name
+    return f"{username} ({user.id})"
+
+
+async def _ensure_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     reply = _get_reply_target(update)
     if reply is None:
-        return
+        return False
 
     admin_ids = settings.admin_ids
     if not admin_ids:
         await reply("Администраторы не настроены. Укажи ADMIN_USER_IDS.")
-        return
+        return False
 
     user_id = update.effective_user.id if update.effective_user else None
     if user_id not in admin_ids:
         await reply("Команда доступна только администраторам.")
-        return
+        return False
+    return True
+
+
+async def handle_admin_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle /remind admin command."""
+    if not await _ensure_admin(update, context):
+        return ConversationHandler.END
 
     args = context.args or []
-    if len(args) < 3:
+    if args:
+        return await _handle_direct_reminder(update, context, args)
+
+    replied_user_id = _get_replied_user_id(update)
+    if replied_user_id:
+        context.user_data[_REMINDER_TARGET_ID_KEY] = replied_user_id
+        label = _get_replied_user_label(update)
+        if label:
+            context.user_data[_REMINDER_TARGET_LABEL_KEY] = label
+        reply = _get_reply_target(update)
+        if reply:
+            await reply(_PROMPT_WHEN)
+        return REMIND_WHEN
+
+    reply = _get_reply_target(update)
+    if reply:
+        await reply(_PROMPT_TARGET)
+    return REMIND_TARGET
+
+
+async def _handle_direct_reminder(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    args: list[str],
+) -> int:
+    reply = _get_reply_target(update)
+    if reply is None:
+        return ConversationHandler.END
+
+    if len(args) < 2:
         await reply(_USAGE_TEXT)
-        return
+        return ConversationHandler.END
 
     user_token = args[0]
+    parse_now = datetime.now()
+
     try:
-        scheduled_for, consumed = _parse_datetime_tokens(args[1:])
+        scheduled_for, consumed = _parse_datetime_tokens(args[1:], parse_now)
     except ValueError:
         await reply(_USAGE_TEXT)
-        return
+        return ConversationHandler.END
 
     message_tokens = args[1 + consumed:]
     if not message_tokens:
         await reply(_USAGE_TEXT)
-        return
+        return ConversationHandler.END
 
     now = datetime.now(tz=scheduled_for.tzinfo) if scheduled_for.tzinfo else datetime.now()
     delay_seconds = (scheduled_for - now).total_seconds()
     if delay_seconds <= 0:
         await reply("Время напоминания должно быть в будущем.")
-        return
+        return ConversationHandler.END
 
     try:
         target_chat_id, target_label = await _resolve_target_chat_id(user_token, context)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to resolve user %s: %s", user_token, exc)
         await reply("Не удалось найти пользователя. Укажи user_id или @username.")
-        return
+        return ConversationHandler.END
 
     message = " ".join(message_tokens)
     _schedule_reminder_task(
@@ -165,4 +281,124 @@ async def handle_admin_reminder(update: Update, context: ContextTypes.DEFAULT_TY
         f"Получатель: {target_label}\n"
         f"Когда: {_format_datetime(scheduled_for)}\n"
         f"Текст: {message}"
+    )
+    return ConversationHandler.END
+
+
+async def handle_reminder_target(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    reply = _get_reply_target(update)
+    if reply is None:
+        return ConversationHandler.END
+
+    text = update.effective_message.text.strip() if update.effective_message else ""
+    if not text:
+        await reply(_PROMPT_TARGET)
+        return REMIND_TARGET
+
+    try:
+        target_chat_id, target_label = await _resolve_target_chat_id(text, context)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to resolve user %s: %s", text, exc)
+        await reply("Не удалось найти пользователя. Укажи user_id или @username.")
+        return REMIND_TARGET
+
+    context.user_data[_REMINDER_TARGET_ID_KEY] = target_chat_id
+    context.user_data[_REMINDER_TARGET_LABEL_KEY] = target_label
+
+    await reply(_PROMPT_WHEN)
+    return REMIND_WHEN
+
+
+async def handle_reminder_when(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    reply = _get_reply_target(update)
+    if reply is None:
+        return ConversationHandler.END
+
+    text = update.effective_message.text.strip() if update.effective_message else ""
+    if not text:
+        await reply(_PROMPT_WHEN)
+        return REMIND_WHEN
+
+    try:
+        scheduled_for = _parse_when_text(text)
+    except ValueError:
+        await reply(_PROMPT_WHEN)
+        return REMIND_WHEN
+
+    now = datetime.now(tz=scheduled_for.tzinfo) if scheduled_for.tzinfo else datetime.now()
+    if scheduled_for <= now:
+        await reply("Время напоминания должно быть в будущем.")
+        return REMIND_WHEN
+
+    context.user_data[_REMINDER_WHEN_KEY] = scheduled_for
+    await reply(_PROMPT_MESSAGE)
+    return REMIND_MESSAGE
+
+
+async def handle_reminder_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    reply = _get_reply_target(update)
+    if reply is None:
+        return ConversationHandler.END
+
+    text = update.effective_message.text.strip() if update.effective_message else ""
+    if not text:
+        await reply(_PROMPT_MESSAGE)
+        return REMIND_MESSAGE
+
+    target_chat_id = context.user_data.get(_REMINDER_TARGET_ID_KEY)
+    scheduled_for = context.user_data.get(_REMINDER_WHEN_KEY)
+    target_label = context.user_data.get(_REMINDER_TARGET_LABEL_KEY, str(target_chat_id))
+
+    if not target_chat_id or not scheduled_for:
+        _clear_reminder_state(context)
+        await reply(_USAGE_TEXT)
+        return ConversationHandler.END
+
+    now = datetime.now(tz=scheduled_for.tzinfo) if scheduled_for.tzinfo else datetime.now()
+    delay_seconds = (scheduled_for - now).total_seconds()
+    if delay_seconds <= 0:
+        _clear_reminder_state(context)
+        await reply("Время напоминания должно быть в будущем.")
+        return ConversationHandler.END
+
+    _schedule_reminder_task(
+        _send_reminder_after_delay(
+            context,
+            chat_id=target_chat_id,
+            message=text,
+            delay_seconds=delay_seconds,
+        )
+    )
+
+    _clear_reminder_state(context)
+    await reply(
+        "✅ Напоминание поставлено.\n"
+        f"Получатель: {target_label}\n"
+        f"Когда: {_format_datetime(scheduled_for)}\n"
+        f"Текст: {text}"
+    )
+    return ConversationHandler.END
+
+
+async def cancel_admin_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    reply = _get_reply_target(update)
+    if reply is not None:
+        await reply("Ок, отменил.")
+    _clear_reminder_state(context)
+    return ConversationHandler.END
+
+
+def build_admin_reminder_handler() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[
+            CommandHandler("remind", handle_admin_reminder),
+            CommandHandler("reminder", handle_admin_reminder),
+        ],
+        states={
+            REMIND_TARGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_reminder_target)],
+            REMIND_WHEN: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_reminder_when)],
+            REMIND_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_reminder_message)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_admin_reminder)],
+        allow_reentry=True,
     )
