@@ -27,16 +27,39 @@ REMIND_TARGET, REMIND_WHEN, REMIND_MESSAGE = range(3)
 _USAGE_TEXT = (
     "Использование:\n"
     "/remind <user_id|@username> <YYYY-MM-DD HH:MM> <сообщение>\n"
+    "Можно указать ссылку t.me/username.\n"
     "Пример: /remind 123456789 2024-06-30 09:00 Напомнить про оплату\n"
     "Время — по Москве (MSK)."
 )
 
-_PROMPT_TARGET = "Кому напомнить? Укажи user_id или @username."
+_PROMPT_TARGET = (
+    "Кому напомнить? Укажи user_id или @username (пользователь должен писать боту). "
+    "Можно ответом на сообщение. /cancel — выйти."
+)
 _PROMPT_WHEN = "Когда? Формат: YYYY-MM-DD HH:MM или HH:MM (сегодня/завтра, MSK)."
 _PROMPT_MESSAGE = "Что написать пользователю?"
 
+_USER_NOT_FOUND_TEXT = (
+    "Не удалось найти пользователя. @username работает только если пользователь писал боту "
+    "или есть общий чат. Попробуй ответить на сообщение пользователя или указать user_id."
+)
+
+_DOMAIN_IN_REMIND_TEXT = (
+    "Похоже, это домен или ссылка. /remind принимает user_id или @username. "
+    "Если нужно добавить домен — используй /add <домен> <категория> или /cancel и отправь "
+    "домен отдельным сообщением."
+)
+
 _TIME_ONLY_RE = re.compile(r"^\d{1,2}:\d{2}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_TME_USERNAME_RE = re.compile(
+    r"^(?:https?://)?(?:t\.me|telegram\.me)/(?P<username>[A-Za-z0-9_]{5,})(?:/)?(?:\?.*)?$",
+    re.IGNORECASE,
+)
+_DOMAIN_TOKEN_RE = re.compile(
+    r"^(?:https?://)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:/.*)?$",
+    re.IGNORECASE,
+)
 
 _REMINDER_TARGET_ID_KEY = "reminder_target_id"
 _REMINDER_TARGET_LABEL_KEY = "reminder_target_label"
@@ -84,6 +107,22 @@ def _parse_datetime_tokens(tokens: list[str], now: datetime) -> tuple[datetime, 
 
     candidate = f"{tokens[0]} {tokens[1]}"
     return _as_timezone(datetime.fromisoformat(candidate), now.tzinfo or _get_reminder_timezone()), 2
+
+
+def _normalize_user_token(user_token: str) -> str:
+    normalized = user_token.strip()
+    match = _TME_USERNAME_RE.match(normalized)
+    if match:
+        return f"@{match.group('username')}"
+    return normalized
+
+
+def _looks_like_domain_token(token: str) -> bool:
+    if token.startswith("@"):
+        return False
+    if token.isdigit():
+        return False
+    return bool(_DOMAIN_TOKEN_RE.match(token))
 
 
 def _format_datetime(value: datetime) -> str:
@@ -316,7 +355,10 @@ async def _handle_direct_reminder(
         await reply(_USAGE_TEXT)
         return ConversationHandler.END
 
-    user_token = args[0]
+    user_token = _normalize_user_token(args[0])
+    if _looks_like_domain_token(user_token):
+        await reply(_DOMAIN_IN_REMIND_TEXT)
+        return ConversationHandler.END
     parse_now = datetime.now(_get_reminder_timezone())
 
     try:
@@ -340,7 +382,7 @@ async def _handle_direct_reminder(
         target_chat_id, target_label = await _resolve_target_chat_id(user_token, context)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to resolve user %s: %s", user_token, exc)
-        await reply("Не удалось найти пользователя. Укажи user_id или @username.")
+        await reply(_USER_NOT_FOUND_TEXT)
         return ConversationHandler.END
 
     message = " ".join(message_tokens)
@@ -375,11 +417,16 @@ async def handle_reminder_target(update: Update, context: ContextTypes.DEFAULT_T
         await reply(_PROMPT_TARGET)
         return REMIND_TARGET
 
+    text = _normalize_user_token(text)
+    if _looks_like_domain_token(text):
+        await reply(_DOMAIN_IN_REMIND_TEXT)
+        return REMIND_TARGET
+
     try:
         target_chat_id, target_label = await _resolve_target_chat_id(text, context)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to resolve user %s: %s", text, exc)
-        await reply("Не удалось найти пользователя. Укажи user_id или @username.")
+        await reply(_USER_NOT_FOUND_TEXT)
         return REMIND_TARGET
 
     context.user_data[_REMINDER_TARGET_ID_KEY] = target_chat_id
