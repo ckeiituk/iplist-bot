@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     # Constants with defaults
     github_repo: str = "ckeiituk/iplist"
     github_branch: str = "master"
-    gemini_model: str = "gemma-3-27b-it"
+    gemini_model: str = "gemma-4-31b-it"
     dns_servers: list[str] = ["127.0.0.11:53", "77.88.8.88:53", "8.8.8.8:53", "1.1.1.1:53"]
     
     # Parsed values (set by model_validator)

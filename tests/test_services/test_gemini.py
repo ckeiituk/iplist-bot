@@ -61,6 +61,31 @@ class TestGeminiClient:
             assert result == "Test response"
     
     @pytest.mark.asyncio
+    async def test_generate_skips_thought_parts(self, gemini_client):
+        """Test that reasoning parts are excluded from the returned text."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "candidates": [{
+                "content": {
+                    "parts": [
+                        {"text": "Steam is a gaming platform...", "thought": True},
+                        {"text": "gaming"},
+                    ]
+                }
+            }]
+        }
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_client.return_value.__aenter__.return_value.post = AsyncMock(
+                return_value=mock_response
+            )
+
+            result = await gemini_client.generate("Test prompt")
+
+            assert result == "gaming"
+
+    @pytest.mark.asyncio
     async def test_generate_rotates_on_429(self, gemini_client):
         """Test that client rotates keys on 429 error."""
         mock_429 = MagicMock()

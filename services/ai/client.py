@@ -13,7 +13,11 @@ class GeminiClient:
     """Client for Google Gemini API with key rotation."""
     
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
-    
+
+    # Gemma 4 reasoning is always on and its tokens count against
+    # maxOutputTokens, so the answer budget needs extra room on top.
+    REASONING_HEADROOM = 1024
+
     def __init__(self, api_keys: list[str], model: str):
         self._api_keys = api_keys
         self._model = model
@@ -34,7 +38,8 @@ class GeminiClient:
         
         Args:
             prompt: The prompt to send to the model
-            max_tokens: Maximum tokens in response
+            max_tokens: Maximum tokens in the final answer (reasoning
+                headroom is added on top)
             
         Returns:
             Generated text response
@@ -47,7 +52,7 @@ class GeminiClient:
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
-                "maxOutputTokens": max_tokens,
+                "maxOutputTokens": max_tokens + self.REASONING_HEADROOM,
                 "temperature": 0.1,
             },
         }
@@ -64,15 +69,26 @@ class GeminiClient:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 try:
                     response = await client.post(
-                        f"{url}?key={api_key}",
-                        headers={"Content-Type": "application/json"},
+                        url,
+                        headers={
+                            "Content-Type": "application/json",
+                            "x-goog-api-key": api_key,
+                        },
                         json=payload,
                     )
-                    
+
                     if response.status_code == 200:
                         result = response.json()
                         if "candidates" in result and result["candidates"]:
-                            return result["candidates"][0]["content"]["parts"][0]["text"].strip()
+                            parts = result["candidates"][0]["content"]["parts"]
+                            answer = "".join(
+                                part.get("text", "")
+                                for part in parts
+                                if not part.get("thought")
+                            ).strip()
+                            if not answer:
+                                raise GeminiAPIError("No answer text returned from Gemini")
+                            return answer
                         else:
                             raise GeminiAPIError("No candidates returned from Gemini")
                     

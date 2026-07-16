@@ -74,7 +74,7 @@ class TestSettings:
         
         assert settings.github_repo == "ckeiituk/iplist"
         assert settings.github_branch == "master"
-        assert settings.gemini_model == "gemma-3-27b-it"
+        assert settings.gemini_model == "gemma-4-31b-it"
         assert len(settings.dns_servers) == 4
     
     @pytest.mark.skip(reason="Settings reads from .env file directly, not affected by monkeypatch")
