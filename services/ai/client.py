@@ -14,8 +14,10 @@ class GeminiClient:
     
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
-    # Gemma 4 reasoning is always on and its tokens count against
-    # maxOutputTokens, so the answer budget needs extra room on top.
+    # Thinking is disabled via thinkingConfig below, but per the Gemma 4
+    # model card larger models may occasionally emit thought tokens anyway,
+    # and those count against maxOutputTokens — keep headroom so the
+    # answer never truncates.
     REASONING_HEADROOM = 1024
 
     def __init__(self, api_keys: list[str], model: str):
@@ -54,6 +56,10 @@ class GeminiClient:
             "generationConfig": {
                 "maxOutputTokens": max_tokens + self.REASONING_HEADROOM,
                 "temperature": 0.1,
+                # Gemma 4 rejects "low"/"high" and ignores includeThoughts;
+                # lowercase "minimal" is the only working way to disable
+                # thinking (uppercase "MINIMAL" hangs the request)
+                "thinkingConfig": {"thinkingLevel": "minimal"},
             },
         }
         
